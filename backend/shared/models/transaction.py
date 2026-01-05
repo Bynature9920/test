@@ -34,14 +34,14 @@ class Transaction(BaseModel):
     """Transaction model."""
     __tablename__ = "transactions"
     
-    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(String(20), ForeignKey("users.id"), nullable=False, index=True)
     transaction_type = Column(SQLEnum(TransactionType), nullable=False)
     status = Column(SQLEnum(TransactionStatus), nullable=False, default=TransactionStatus.PENDING)
     amount = Column(Numeric(20, 2), nullable=False)
     currency = Column(String(3), nullable=False, default="NGN")
     fee = Column(Numeric(20, 2), nullable=False, default=0.00)
     net_amount = Column(Numeric(20, 2), nullable=False)
-    recipient_id = Column(String(36), nullable=True, index=True)
+    recipient_id = Column(String(20), nullable=True, index=True)
     description = Column(Text, nullable=True)
     reference = Column(String(100), nullable=True, index=True)
     transaction_metadata = Column(Text, nullable=True)  # JSON string (renamed from 'metadata' - reserved word)

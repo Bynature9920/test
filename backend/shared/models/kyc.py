@@ -18,7 +18,7 @@ class KYCVerification(BaseModel):
     """KYC verification model."""
     __tablename__ = "kyc_verifications"
     
-    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, unique=True, index=True)
+    user_id = Column(String(20), ForeignKey("users.id"), nullable=False, unique=True, index=True)
     status = Column(SQLEnum(KYCStatus), nullable=False, default=KYCStatus.PENDING)
     provider_verification_id = Column(String(100), nullable=True)  # External provider ID
     
@@ -51,7 +51,7 @@ class KYCVerification(BaseModel):
     
     # Verification Details
     verified_at = Column(String(50), nullable=True)
-    verified_by = Column(String(36), nullable=True)  # Admin user ID
+    verified_by = Column(String(20), nullable=True)  # Admin user ID
     rejection_reason = Column(Text, nullable=True)
     provider_response = Column(Text, nullable=True)  # JSON string
 

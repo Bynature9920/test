@@ -23,7 +23,7 @@ class Card(BaseModel):
     """Virtual debit card model."""
     __tablename__ = "cards"
     
-    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(String(20), ForeignKey("users.id"), nullable=False, index=True)
     card_number = Column(String(16), nullable=False, unique=True, index=True)
     cardholder_name = Column(String(100), nullable=False)
     expiry_month = Column(Integer, nullable=False)
@@ -43,7 +43,7 @@ class CardTransaction(BaseModel):
     """Card transaction model."""
     __tablename__ = "card_transactions"
     
-    card_id = Column(String(36), ForeignKey("cards.id"), nullable=False, index=True)
+    card_id = Column(String(20), ForeignKey("cards.id"), nullable=False, index=True)
     transaction_type = Column(String(20), nullable=False)  # FUND, PAYMENT, REFUND
     amount = Column(Numeric(20, 2), nullable=False)
     currency = Column(String(3), nullable=False, default="NGN")

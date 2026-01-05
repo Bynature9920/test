@@ -1,10 +1,14 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import toast from 'react-hot-toast'
-import { User, Lock, Phone, Mail, Camera, Shield, Edit2, Save, X } from 'lucide-react'
+import { 
+  User, Lock, Phone, Mail, Camera, Shield, Edit2, Save, X, 
+  HelpCircle, Info, MessageCircle, MessageSquare, LogOut, ChevronDown, ChevronUp
+} from 'lucide-react'
 import { profileService } from '@/services/api/profileService'
 import { authService } from '@/services/api/authService'
 
@@ -33,12 +37,14 @@ type UpdateEmailData = z.infer<typeof updateEmailSchema>
 type UpdatePhoneData = z.infer<typeof updatePhoneSchema>
 
 export default function ProfilePage() {
-  const { user } = useAuth()
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
   const [isEditingEmail, setIsEditingEmail] = useState(false)
   const [isEditingPhone, setIsEditingPhone] = useState(false)
   const [isChangingPassword, setIsChangingPassword] = useState(false)
   const [profileImage, setProfileImage] = useState<string | null>(null)
   const [isLoadingImage, setIsLoadingImage] = useState(false)
+  const [expandedFaq, setExpandedFaq] = useState<number | null>(null)
 
   // Password form
   const passwordForm = useForm<ChangePasswordData>({
@@ -134,6 +140,19 @@ export default function ProfilePage() {
     } finally {
       setIsLoadingImage(false)
     }
+  }
+
+  const faqData = [
+    { question: 'How do I verify my account?', answer: 'Go to Profile → Verification and follow the steps to upload your documents.' },
+    { question: 'How long does verification take?', answer: 'Verification typically takes 1-3 business days. You\'ll receive a notification once completed.' },
+    { question: 'How do I deposit crypto?', answer: 'Navigate to the Crypto section, select your currency, and get your unique deposit address.' },
+    { question: 'What are the transaction fees?', answer: 'Transaction fees vary by payment method. Check our Payments page for current rates.' },
+    { question: 'How do I reset my password?', answer: 'Use the "Forgot Password" link on the login page or change it here in Profile Settings.' },
+  ]
+
+  const handleLogout = () => {
+    logout()
+    navigate('/login')
   }
 
   const getKycStatusBadge = (status: string) => {
@@ -504,6 +523,140 @@ export default function ProfilePage() {
             </div>
           </form>
         )}
+      </div>
+
+      {/* FAQ Section */}
+      <div className="card p-6">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center">
+          <HelpCircle className="w-5 h-5 mr-2" />
+          Frequently Asked Questions
+        </h2>
+        <div className="space-y-3">
+          {faqData.map((faq, index) => (
+            <div key={index} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+              <button
+                onClick={() => setExpandedFaq(expandedFaq === index ? null : index)}
+                className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors"
+              >
+                <span className="font-medium text-gray-900 dark:text-gray-100 text-left">{faq.question}</span>
+                {expandedFaq === index ? (
+                  <ChevronUp className="w-5 h-5 text-gray-500 flex-shrink-0" />
+                ) : (
+                  <ChevronDown className="w-5 h-5 text-gray-500 flex-shrink-0" />
+                )}
+              </button>
+              {expandedFaq === index && (
+                <div className="px-4 py-3 bg-gray-50 dark:bg-slate-800 border-t border-gray-200 dark:border-gray-700">
+                  <p className="text-gray-700 dark:text-gray-300">{faq.answer}</p>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* About Us Section */}
+      <div className="card p-6">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center">
+          <Info className="w-5 h-5 mr-2" />
+          About Us
+        </h2>
+        <div className="text-gray-700 dark:text-gray-300 space-y-4">
+          <p className="font-semibold text-gray-900 dark:text-gray-100">
+            BenGo is built for people who are always moving forward.
+          </p>
+          <p>
+            We created BenGo to help students, freelancers, and travelers manage their money without stress. 
+            From sending money to family, funding accounts with crypto, paying tuition, booking travel, or making 
+            everyday payments, BenGo brings everything into one simple and secure platform.
+          </p>
+          <p>
+            Money should be easy, flexible, and available when you need it. BenGo is designed to give you control, 
+            speed, and peace of mind, whether you're studying, working online, traveling, or supporting the people you care about.
+          </p>
+          <p>
+            At BenGo, we're building more than a financial app. We're building a trusted companion for modern life.
+          </p>
+          <p className="text-sm font-semibold text-primary-600 dark:text-primary-400 italic pt-2 border-t border-gray-200 dark:border-gray-700">
+            BenGo, Built for life on the go
+          </p>
+        </div>
+      </div>
+
+      {/* Contact Us Section */}
+      <div className="card p-6">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center">
+          <MessageCircle className="w-5 h-5 mr-2" />
+          Contact Us
+        </h2>
+        <div className="space-y-3 text-gray-700 dark:text-gray-300">
+          <div className="flex items-start gap-3">
+            <Mail className="w-5 h-5 text-gray-500 mt-0.5" />
+            <div>
+              <p className="font-medium text-gray-900 dark:text-gray-100">Email</p>
+              <p className="text-sm">support@bengo.com</p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3">
+            <Phone className="w-5 h-5 text-gray-500 mt-0.5" />
+            <div>
+              <p className="font-medium text-gray-900 dark:text-gray-100">Phone</p>
+              <p className="text-sm">+234 800 123 4567</p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3">
+            <MessageSquare className="w-5 h-5 text-gray-500 mt-0.5" />
+            <div>
+              <p className="font-medium text-gray-900 dark:text-gray-100">Business Hours</p>
+              <p className="text-sm">Monday - Friday: 9:00 AM - 6:00 PM WAT</p>
+              <p className="text-sm">Saturday: 10:00 AM - 4:00 PM WAT</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Live Chat Section */}
+      <div className="card p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1 flex items-center">
+              <MessageSquare className="w-5 h-5 mr-2" />
+              Chat with Live Agent
+            </h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Get instant support or connect with a live agent
+            </p>
+          </div>
+          <button
+            onClick={() => navigate('/chat')}
+            className="btn-primary flex items-center gap-2"
+          >
+            <MessageSquare className="w-4 h-4" />
+            Start Chat
+          </button>
+        </div>
+      </div>
+
+      {/* Logout Section - Last */}
+      <div className="card p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1 flex items-center">
+              <LogOut className="w-5 h-5 mr-2" />
+              Logout
+            </h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Sign out of your account
+            </p>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="btn-primary flex items-center gap-2"
+          >
+            <LogOut className="w-4 h-4" />
+            Logout
+          </button>
+        </div>
       </div>
     </div>
   )

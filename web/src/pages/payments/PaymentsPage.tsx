@@ -243,7 +243,7 @@ export default function PaymentsPage() {
                   pattern="FIN[0-9A-Z]{8}"
                 />
                 <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
-                  Enter the recipient's unique User ID (format: FIN12345678)
+                  Enter the recipient's unique User ID (12-digit number)
                 </p>
               </div>
               <div>

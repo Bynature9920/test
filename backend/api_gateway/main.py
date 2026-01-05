@@ -207,9 +207,8 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)):
         # Hash password
         password_hash = get_password_hash(user_data.password)
         
-        # Create user
+        # Create user (ID will be auto-generated as numeric by BaseModel)
         new_user = User(
-            id=str(uuid.uuid4()),
             email=user_data.email,
             phone=user_data.phone,
             password_hash=password_hash,

@@ -21,7 +21,7 @@ class Loan(BaseModel):
     """Loan model."""
     __tablename__ = "loans"
     
-    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(String(20), ForeignKey("users.id"), nullable=False, index=True)
     amount = Column(Numeric(20, 2), nullable=False)
     interest_rate = Column(Numeric(5, 2), nullable=False)
     total_amount = Column(Numeric(20, 2), nullable=False)
@@ -42,10 +42,10 @@ class LoanRepayment(BaseModel):
     """Loan repayment model."""
     __tablename__ = "loan_repayments"
     
-    loan_id = Column(String(36), ForeignKey("loans.id"), nullable=False, index=True)
+    loan_id = Column(String(20), ForeignKey("loans.id"), nullable=False, index=True)
     amount = Column(Numeric(20, 2), nullable=False)
     payment_method = Column(String(50), nullable=False)  # WALLET, BANK_TRANSFER
-    transaction_id = Column(String(36), nullable=True, index=True)
+    transaction_id = Column(String(20), nullable=True, index=True)
     
     # Relationships
     loan = relationship("Loan", back_populates="repayments")

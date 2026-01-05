@@ -88,7 +88,6 @@ export default function LoginPage() {
   const onSubmit = async (data: LoginFormData) => {
     setIsLoading(true)
     try {
-      // For demo credentials, login should never throw an error
       await login(data.email, data.password)
       toast.success('Login successful!')
       // Small delay to ensure state is updated
@@ -96,7 +95,6 @@ export default function LoginPage() {
         navigate('/dashboard')
       }, 100)
     } catch (error: any) {
-      // Only show error if login actually failed (not for demo credentials)
       const errorMessage = error?.response?.data?.error || error?.message || 'Login failed. Please check your credentials.'
       toast.error(errorMessage)
       console.error('Login error:', error)
@@ -317,39 +315,6 @@ After saving, close ALL browser windows, wait 5-10 minutes, and try again.
             </p>
           )}
           
-          {/* Google OAuth Setup Instructions - Always visible during development */}
-          {googleReady && (
-            <div className="mt-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg text-xs">
-              <p className="text-yellow-900 dark:text-yellow-200 font-semibold mb-2">
-                ⚠️ If popup shows "can't continue":
-              </p>
-              <div className="space-y-2 text-yellow-800 dark:text-yellow-300">
-                <p><strong>✅ Step 1:</strong> Add this URL to Google Cloud Console:</p>
-                <div className="bg-white dark:bg-gray-800 p-2 rounded border border-yellow-300 dark:border-yellow-700 mb-2">
-                  <code className="text-blue-600 dark:text-blue-400 font-mono font-bold">
-                    {window.location.origin}
-                  </code>
-                </div>
-                <p><strong>✅ Step 2:</strong> Configure OAuth Consent Screen:</p>
-                <ul className="list-disc list-inside space-y-1 ml-2">
-                  <li>Go to: <a href="https://console.cloud.google.com/apis/credentials/consent" target="_blank" rel="noopener noreferrer" className="underline hover:text-yellow-600">Consent Screen</a></li>
-                  <li>If "Testing" mode: Add your email as test user</li>
-                  <li>Fill in App name, support email, developer contact</li>
-                  <li>Add scopes: email, profile, openid</li>
-                </ul>
-                <p><strong>✅ Step 3:</strong> Wait & Clear Cache:</p>
-                <ul className="list-disc list-inside space-y-1 ml-2">
-                  <li>Save changes & wait 10 minutes</li>
-                  <li>Close ALL browser windows</li>
-                  <li>Clear cache (Ctrl+Shift+Delete)</li>
-                  <li>Try in incognito mode first</li>
-                </ul>
-                <p className="mt-2 text-yellow-700 dark:text-yellow-400 italic">
-                  📄 See GOOGLE_OAUTH_IMMEDIATE_TROUBLESHOOTING.md for full guide
-                </p>
-              </div>
-            </div>
-          )}
         </div>
 
         <div className="mt-6 text-center">
@@ -368,29 +333,6 @@ After saving, close ALL browser windows, wait 5-10 minutes, and try again.
               Sign up
             </Link>
           </p>
-        </div>
-
-        {/* Demo Login Info */}
-        <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg">
-          <p className="text-sm font-semibold text-blue-900 dark:text-blue-200 mb-2">Demo Login:</p>
-          <p className="text-xs text-blue-700 dark:text-blue-300">
-            Email: <span className="font-mono font-semibold">demo@fintech.com</span>
-          </p>
-          <p className="text-xs text-blue-700 dark:text-blue-300">
-            Password: <span className="font-mono font-semibold">demo123</span>
-          </p>
-          <button
-            type="button"
-            onClick={() => {
-              const emailInput = document.getElementById('email') as HTMLInputElement
-              const passwordInput = document.getElementById('password') as HTMLInputElement
-              if (emailInput) emailInput.value = 'demo@fintech.com'
-              if (passwordInput) passwordInput.value = 'demo123'
-            }}
-            className="mt-2 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 underline"
-          >
-            Fill demo credentials
-          </button>
         </div>
       </div>
     </div>

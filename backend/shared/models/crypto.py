@@ -24,7 +24,7 @@ class CryptoBalance(BaseModel):
     """Crypto balance model."""
     __tablename__ = "crypto_balances"
     
-    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(String(20), ForeignKey("users.id"), nullable=False, index=True)
     currency = Column(SQLEnum(CryptoCurrency), nullable=False)
     balance = Column(Numeric(20, 8), nullable=False, default=0.00000000)
     ngn_value = Column(Numeric(20, 2), nullable=False, default=0.00)
@@ -37,8 +37,8 @@ class CryptoTransaction(BaseModel):
     """Crypto transaction model."""
     __tablename__ = "crypto_transactions"
     
-    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
-    crypto_balance_id = Column(String(36), ForeignKey("crypto_balances.id"), nullable=True)
+    user_id = Column(String(20), ForeignKey("users.id"), nullable=False, index=True)
+    crypto_balance_id = Column(String(20), ForeignKey("crypto_balances.id"), nullable=True)
     transaction_type = Column(String(20), nullable=False)  # FUND, CONVERT, WITHDRAW
     currency = Column(SQLEnum(CryptoCurrency), nullable=False)
     amount = Column(Numeric(20, 8), nullable=False)

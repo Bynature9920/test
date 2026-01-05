@@ -201,14 +201,11 @@ export default function VerificationPage() {
               <button
                 key={country.code}
                 onClick={() => handleCountrySelect(country.code)}
-                className="flex items-center gap-3 p-4 border-2 border-gray-200 dark:border-gray-700 rounded-lg hover:border-primary-500 dark:hover:border-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/10 transition-all group"
+                className="flex items-center justify-between p-4 border-2 border-gray-200 dark:border-gray-700 rounded-lg hover:border-primary-500 dark:hover:border-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/10 transition-all group"
               >
-                <span className="text-3xl">{country.flag}</span>
-                <div className="flex-1 text-left">
-                  <p className="font-medium text-gray-900 dark:text-gray-100 group-hover:text-primary-600 dark:group-hover:text-primary-400">
-                    {country.name}
-                  </p>
-                </div>
+                <span className="font-semibold text-lg text-gray-900 dark:text-gray-100 group-hover:text-primary-600 dark:group-hover:text-primary-400">
+                  {country.name}
+                </span>
                 <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-primary-600 dark:group-hover:text-primary-400" />
               </button>
             ))}

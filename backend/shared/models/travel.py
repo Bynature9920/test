@@ -24,7 +24,7 @@ class TravelBooking(BaseModel):
     """Travel booking model."""
     __tablename__ = "travel_bookings"
     
-    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(String(20), ForeignKey("users.id"), nullable=False, index=True)
     booking_type = Column(SQLEnum(BookingType), nullable=False)
     status = Column(SQLEnum(BookingStatus), nullable=False, default=BookingStatus.PENDING)
     amount = Column(Numeric(20, 2), nullable=False)
@@ -35,5 +35,5 @@ class TravelBooking(BaseModel):
     travel_date = Column(Date, nullable=True)
     return_date = Column(Date, nullable=True)
     location = Column(String(255), nullable=True)
-    transaction_id = Column(String(36), nullable=True, index=True)
+    transaction_id = Column(String(20), nullable=True, index=True)
 

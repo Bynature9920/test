@@ -21,8 +21,8 @@ export default function WalletPage() {
   const [converting, setConverting] = useState(false)
   const [userIdCopied, setUserIdCopied] = useState(false)
 
-  // Generate unique user ID from user data
-  const userId = user?.id ? `FIN${user.id.slice(-8).toUpperCase()}` : 'FIN00000000'
+  // Display the full numeric user ID
+  const userId = user?.id || '000000000000'
 
   useEffect(() => {
     loadData()

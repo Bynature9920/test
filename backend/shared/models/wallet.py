@@ -17,7 +17,7 @@ class Wallet(BaseModel):
     """Wallet model."""
     __tablename__ = "wallets"
     
-    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(String(20), ForeignKey("users.id"), nullable=False, index=True)
     currency = Column(String(3), nullable=False, default="NGN")
     balance = Column(Numeric(20, 2), nullable=False, default=0.00)
     pending_balance = Column(Numeric(20, 2), nullable=False, default=0.00)
@@ -32,8 +32,8 @@ class LedgerEntry(BaseModel):
     """Ledger entry for double-entry accounting."""
     __tablename__ = "ledger_entries"
     
-    wallet_id = Column(String(36), ForeignKey("wallets.id"), nullable=False, index=True)
-    transaction_id = Column(String(36), nullable=False, index=True)
+    wallet_id = Column(String(20), ForeignKey("wallets.id"), nullable=False, index=True)
+    transaction_id = Column(String(20), nullable=False, index=True)
     account_type = Column(String(20), nullable=False)  # ASSET, LIABILITY, etc.
     entry_type = Column(String(10), nullable=False)  # DEBIT, CREDIT
     amount = Column(Numeric(20, 2), nullable=False)

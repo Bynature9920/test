@@ -13,6 +13,7 @@ import LoansPage from '@/pages/loans/LoansPage'
 import TravelPage from '@/pages/travel/TravelPage'
 import ProfilePage from '@/pages/profile/ProfilePage'
 import VerificationPage from '@/pages/verification/VerificationPage'
+import ChatPage from '@/pages/chat/ChatPage'
 import Layout from '@/components/layout/Layout'
 
 function AppRouter() {
@@ -65,6 +66,7 @@ function AppRouter() {
                 <Route path="/travel" element={<TravelPage />} />
                 <Route path="/profile" element={<ProfilePage />} />
                 <Route path="/verification" element={<VerificationPage />} />
+                <Route path="/chat" element={<ChatPage />} />
                 <Route path="/" element={<Navigate to="/dashboard" />} />
               </Routes>
             </Layout>

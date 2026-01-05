@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { useTheme } from '@/contexts/ThemeContext'
@@ -6,7 +6,8 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import toast from 'react-hot-toast'
-import { Sun, Moon } from 'lucide-react'
+import { Sun, Moon, ChevronDown, Search } from 'lucide-react'
+import { countries, Country } from '@/data/countries'
 
 const registerSchema = z.object({
   email: z.string().email('Invalid email address'),
@@ -25,6 +26,27 @@ export default function RegisterPage() {
   const { theme, toggleTheme } = useTheme()
   const [isLoading, setIsLoading] = useState(false)
   const [isGoogleLoading, setIsGoogleLoading] = useState(false)
+  const [selectedCountry, setSelectedCountry] = useState<Country>(
+    countries.find(c => c.code === 'NG') || countries[0]
+  )
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false)
+        setSearchQuery('')
+      }
+    }
+
+    if (isDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [isDropdownOpen])
 
   const {
     register,
@@ -40,7 +62,15 @@ export default function RegisterPage() {
   const onSubmit = async (data: RegisterFormData) => {
     setIsLoading(true)
     try {
-      await registerUser(data)
+      // Combine country code with phone number
+      const fullPhone = data.phone.startsWith('+') 
+        ? data.phone 
+        : `${selectedCountry.dialCode}${data.phone.replace(/^0+/, '')}`
+      
+      await registerUser({
+        ...data,
+        phone: fullPhone,
+      })
       toast.success('Registration successful!')
       navigate('/dashboard')
     } catch (error: any) {
@@ -174,18 +204,80 @@ export default function RegisterPage() {
             <label htmlFor="phone" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
               Phone Number
             </label>
-            <input
-              {...register('phone')}
-              type="tel"
-              id="phone"
-              className="input-field"
-              placeholder="+2348012345678 or 08012345678"
-            />
+            <div className="flex gap-2">
+              {/* Country Code Selector */}
+              <div ref={dropdownRef} className="relative w-32">
+                <button
+                  type="button"
+                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                  className="w-full h-[42px] px-3 py-2 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg text-sm flex items-center justify-between hover:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  <span className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    {selectedCountry.dialCode}
+                  </span>
+                  <ChevronDown className="w-4 h-4 text-gray-500" />
+                </button>
+
+                {/* Dropdown */}
+                {isDropdownOpen && (
+                  <div className="absolute z-50 mt-1 w-80 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg shadow-lg max-h-80 overflow-hidden">
+                    {/* Search */}
+                    <div className="p-2 border-b border-gray-200 dark:border-slate-700">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <input
+                          type="text"
+                          placeholder="Search country..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          className="w-full pl-9 pr-3 py-2 text-sm bg-gray-50 dark:bg-slate-900 border border-gray-300 dark:border-slate-600 rounded focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Countries List */}
+                    <div className="overflow-y-auto max-h-64">
+                      {countries
+                        .filter(country => 
+                          country.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          country.dialCode.includes(searchQuery)
+                        )
+                        .map((country) => (
+                          <button
+                            key={country.code}
+                            type="button"
+                            onClick={() => {
+                              setSelectedCountry(country)
+                              setIsDropdownOpen(false)
+                              setSearchQuery('')
+                            }}
+                            className="w-full px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-slate-700 flex items-center justify-between gap-3 text-sm"
+                          >
+                            <span className="flex-1 text-gray-900 dark:text-gray-100">{country.name}</span>
+                            <span className="font-mono text-gray-500 dark:text-gray-400 text-xs font-semibold">{country.dialCode}</span>
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Phone Number Input */}
+              <div className="flex-1">
+                <input
+                  {...register('phone')}
+                  type="tel"
+                  id="phone"
+                  className="input-field"
+                  placeholder="8012345678"
+                />
+              </div>
+            </div>
             {errors.phone && (
               <p className="mt-1 text-sm text-red-600 dark:text-red-400">{errors.phone.message}</p>
             )}
             <p className="mt-1 text-xs text-gray-500 dark:text-slate-400">
-              Nigerian phone number format: +2348012345678 or 08012345678
+              Enter your phone number without the country code
             </p>
           </div>
 
@@ -258,14 +350,6 @@ export default function RegisterPage() {
             <Link to="/login" className="text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-500 font-medium">
               Sign in
             </Link>
-          </p>
-        </div>
-        
-        {/* Demo Mode Info */}
-        <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg">
-          <p className="text-sm font-semibold text-blue-900 dark:text-blue-200 mb-2">Demo Mode:</p>
-          <p className="text-xs text-blue-700 dark:text-blue-300">
-            You can sign up with any email and password. Your account will be stored locally for demo purposes.
           </p>
         </div>
       </div>
