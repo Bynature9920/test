@@ -91,7 +91,7 @@ export default function RegisterPage() {
       }
 
       // Load Google Identity Services if not already loaded
-      if (typeof window === 'undefined' || !window.google) {
+      if (typeof window === 'undefined' || !(window as any).google) {
         await new Promise<void>((resolve, reject) => {
           const script = document.createElement('script')
           script.src = 'https://accounts.google.com/gsi/client'
@@ -104,7 +104,7 @@ export default function RegisterPage() {
       }
 
       // Initialize Google Sign-In with ID token
-      window.google!.accounts.id.initialize({
+      (window as any).google.accounts.id.initialize({
         client_id: clientId,
         callback: async (response: { credential: string }) => {
           try {
@@ -121,7 +121,7 @@ export default function RegisterPage() {
       })
 
       // Trigger the sign-in popup
-      window.google!.accounts.id.prompt()
+      (window as any).google.accounts.id.prompt()
     } catch (error: any) {
       toast.error('Failed to initialize Google sign-up. Please use email/password for now.')
       setIsGoogleLoading(false)

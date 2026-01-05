@@ -32,12 +32,12 @@ export default function LoginPage() {
     }
 
     const checkGoogle = () => {
-      if (typeof window !== 'undefined' && window.google && window.google.accounts) {
+      if (typeof window !== 'undefined' && (window as any).google && (window as any).google.accounts) {
         try {
           console.log('Initializing Google Identity Services with Client ID:', clientId)
           console.log('Current origin:', window.location.origin)
           
-          window.google.accounts.id.initialize({
+          (window as any).google.accounts.id.initialize({
             client_id: clientId,
             callback: async (response: { credential: string }) => {
               try {
@@ -123,7 +123,7 @@ export default function LoginPage() {
       console.log('Origin:', window.location.origin)
       
       // Disable FedCM and use traditional popup
-      window.google!.accounts.id.prompt((notification: any) => {
+      (window as any).google.accounts.id.prompt((notification: any) => {
         console.log('Prompt notification:', notification)
         
         if (notification.isNotDisplayed()) {
@@ -179,7 +179,7 @@ After saving, close ALL browser windows, wait 5-10 minutes, and try again.
           const reasons = notification.getSkippedReason()
           console.warn('Prompt skipped:', reasons)
           // Try alternative method
-          toast.info('Please select your Google account from the popup')
+          toast('Please select your Google account from the popup')
         } else if (notification.isDismissedMoment()) {
           const reasons = notification.getDismissedReason()
           console.warn('Prompt dismissed:', reasons)

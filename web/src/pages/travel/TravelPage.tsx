@@ -146,12 +146,14 @@ export default function TravelPage() {
         travelClass: data.travelClass || 'ECONOMY',
       })
       setFlights(result.flights)
+      // @ts-ignore - returnFlights may not be in type but exists in API response
       if (result.returnFlights) {
+        // @ts-ignore
         setReturnFlights(result.returnFlights)
       }
       toast.dismiss('flight-search')
       if (result.flights.length === 0) {
-        toast.info('No flights found for your search criteria')
+        toast('No flights found for your search criteria')
       } else {
         toast.success(`Found ${result.flights.length} flights with real-time prices!`)
       }
@@ -191,7 +193,7 @@ export default function TravelPage() {
       setHotels(result.hotels)
       toast.dismiss('hotel-search')
       if (result.hotels.length === 0) {
-        toast.info('No hotels found for your search criteria')
+        toast('No hotels found for your search criteria')
       } else {
         toast.success(`Found ${result.hotels.length} hotels with real-time prices!`)
       }
