@@ -20,7 +20,6 @@ from shared.models.verification import VerificationDocument, VerificationStatus
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 from typing import Optional
-import uuid
 from datetime import datetime, timedelta
 import secrets
 from shared.utils.email import send_password_reset_email
@@ -224,7 +223,18 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(new_user)
         
-        logger.info(f"✅ New user registered: {new_user.email} (ID: {new_user.id})")
+        # Create default NGN wallet with ₦0.00 balance
+        from shared.models.wallet import Wallet
+        default_wallet = Wallet(
+            user_id=new_user.id,
+            currency="NGN",
+            balance=0.00,
+            pending_balance=0.00
+        )
+        db.add(default_wallet)
+        db.commit()
+        
+        logger.info(f"✅ New user registered: {new_user.email} (ID: {new_user.id}) with NGN wallet")
         
         return UserResponse(
             id=str(new_user.id),
@@ -394,9 +404,8 @@ async def google_oauth(oauth_data: GoogleOAuthRequest, db: Session = Depends(get
                 user.last_login = datetime.utcnow()
                 db.commit()
             else:
-                # Create new user
+                # Create new user (ID will be auto-generated as numeric by BaseModel)
                 user = User(
-                    id=str(uuid.uuid4()),
                     email=email,
                     google_id=google_id,
                     oauth_provider="google",
@@ -412,7 +421,19 @@ async def google_oauth(oauth_data: GoogleOAuthRequest, db: Session = Depends(get
                 db.add(user)
                 db.commit()
                 db.refresh(user)
-                logger.info(f"New Google user registered: {user.email} (ID: {user.id})")
+                
+                # Create default NGN wallet with ₦0.00 balance
+                from shared.models.wallet import Wallet
+                default_wallet = Wallet(
+                    user_id=user.id,
+                    currency="NGN",
+                    balance=0.00,
+                    pending_balance=0.00
+                )
+                db.add(default_wallet)
+                db.commit()
+                
+                logger.info(f"New Google user registered: {user.email} (ID: {user.id}) with NGN wallet")
             
             # Create tokens
             access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
@@ -674,7 +695,6 @@ async def submit_verification(
             file_url = f"data:image/png;base64,{doc.file_data[:50]}..."  # Truncate for demo
             
             verification_doc = VerificationDocument(
-                id=str(uuid.uuid4()),
                 user_id=str(user.id),
                 country_code=request.country_code,
                 document_type=doc.document_type,
