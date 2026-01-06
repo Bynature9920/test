@@ -817,6 +817,144 @@ async def get_all_users(
         )
 
 
+@app.post("/api/v1/admin/users/{user_id}/suspend")
+async def suspend_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    token: str = Depends(security)
+):
+    """Suspend a user account (admin only)."""
+    try:
+        current_user_id = get_current_user_id(token)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="Current user not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        # Find target user
+        target_user = db.query(User).filter(User.id == user_id).first()
+        if not target_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Suspend user
+        target_user.is_active = False
+        db.commit()
+        
+        logger.info(f"Admin {current_user.email} suspended user {user_id}")
+        
+        return {"message": "User suspended successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Suspend user error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to suspend user")
+
+
+@app.post("/api/v1/admin/users/{user_id}/activate")
+async def activate_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    token: str = Depends(security)
+):
+    """Activate a suspended user account (admin only)."""
+    try:
+        current_user_id = get_current_user_id(token)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="Current user not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        # Find target user
+        target_user = db.query(User).filter(User.id == user_id).first()
+        if not target_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Activate user
+        target_user.is_active = True
+        db.commit()
+        
+        logger.info(f"Admin {current_user.email} activated user {user_id}")
+        
+        return {"message": "User activated successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Activate user error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to activate user")
+
+
+@app.get("/api/v1/admin/stats")
+async def get_admin_stats(
+    db: Session = Depends(get_db),
+    token: str = Depends(security)
+):
+    """Get platform statistics (admin only)."""
+    try:
+        current_user_id = get_current_user_id(token)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        # Calculate stats
+        from shared.models.transaction import Transaction
+        from shared.models.wallet import Wallet
+        
+        total_users = db.query(User).count()
+        active_users = db.query(User).filter(User.is_active == True).count()
+        pending_kyc = db.query(User).filter(
+            (User.kyc_status == KYCStatus.PENDING) | 
+            (User.kyc_status == KYCStatus.IN_PROGRESS)
+        ).count()
+        
+        total_transactions = db.query(Transaction).count()
+        
+        # Calculate total volume (sum of all transaction amounts)
+        total_volume_result = db.query(Transaction).filter(
+            Transaction.status == 'COMPLETED'
+        ).all()
+        total_volume = sum(float(t.amount) for t in total_volume_result if t.amount)
+        
+        # Pending and failed transactions
+        pending_transactions = db.query(Transaction).filter(
+            Transaction.status == 'PENDING'
+        ).count()
+        failed_transactions = db.query(Transaction).filter(
+            Transaction.status == 'FAILED'
+        ).count()
+        
+        # Platform revenue (sum of all transaction fees)
+        platform_revenue = sum(float(t.fee or 0) for t in total_volume_result)
+        
+        return {
+            "total_users": total_users,
+            "active_users": active_users,
+            "pending_kyc": pending_kyc,
+            "total_transactions": total_transactions,
+            "total_volume": total_volume,
+            "pending_transactions": pending_transactions,
+            "failed_transactions": failed_transactions,
+            "platform_revenue": platform_revenue
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get admin stats error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get statistics")
+
+
 # Wallet routes
 @app.api_route("/api/v1/wallet/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def wallet_proxy(path: str, request: Request):
