@@ -28,6 +28,29 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 security = HTTPBearer()
 
+
+# Helper function to get user ID from token
+def get_current_user_id(credentials: HTTPAuthorizationCredentials) -> str:
+    """Extract user ID from JWT token."""
+    token = credentials.credentials
+    payload = decode_token(token)
+    
+    if not payload or payload.get("type") != "access":
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid access token"
+        )
+    
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid token payload"
+        )
+    
+    return user_id
+
+
 # Service URLs
 SERVICE_URLS = {
     "auth": f"http://localhost:{settings.auth_service_port}",
@@ -671,11 +694,11 @@ class VerificationSubmitRequest(BaseModel):
 async def submit_verification(
     request: VerificationSubmitRequest,
     db: Session = Depends(get_db),
-    token: str = Depends(security)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Submit verification documents."""
     try:
-        current_user_id = get_current_user_id(token)
+        current_user_id = get_current_user_id(credentials)
         user = db.query(User).filter(User.id == current_user_id).first()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
@@ -728,11 +751,11 @@ async def submit_verification(
 @app.get("/api/v1/verification/status")
 async def get_verification_status(
     db: Session = Depends(get_db),
-    token: str = Depends(security)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Get verification status and documents."""
     try:
-        current_user_id = get_current_user_id(token)
+        current_user_id = get_current_user_id(credentials)
         user = db.query(User).filter(User.id == current_user_id).first()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
@@ -772,11 +795,11 @@ async def get_verification_status(
 @app.get("/api/v1/admin/users")
 async def get_all_users(
     db: Session = Depends(get_db),
-    token: str = Depends(security)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Get all users (admin only)."""
     try:
-        current_user_id = get_current_user_id(token)
+        current_user_id = get_current_user_id(credentials)
         current_user = db.query(User).filter(User.id == current_user_id).first()
         if not current_user:
             raise HTTPException(status_code=404, detail="User not found")
@@ -821,11 +844,11 @@ async def get_all_users(
 async def suspend_user(
     user_id: str,
     db: Session = Depends(get_db),
-    token: str = Depends(security)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Suspend a user account (admin only)."""
     try:
-        current_user_id = get_current_user_id(token)
+        current_user_id = get_current_user_id(credentials)
         current_user = db.query(User).filter(User.id == current_user_id).first()
         if not current_user:
             raise HTTPException(status_code=404, detail="Current user not found")
@@ -870,11 +893,11 @@ async def suspend_user(
 async def activate_user(
     user_id: str,
     db: Session = Depends(get_db),
-    token: str = Depends(security)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Activate a suspended user account (admin only)."""
     try:
-        current_user_id = get_current_user_id(token)
+        current_user_id = get_current_user_id(credentials)
         current_user = db.query(User).filter(User.id == current_user_id).first()
         if not current_user:
             raise HTTPException(status_code=404, detail="Current user not found")
@@ -918,11 +941,11 @@ async def activate_user(
 @app.get("/api/v1/admin/stats")
 async def get_admin_stats(
     db: Session = Depends(get_db),
-    token: str = Depends(security)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Get platform statistics (admin only)."""
     try:
-        current_user_id = get_current_user_id(token)
+        current_user_id = get_current_user_id(credentials)
         current_user = db.query(User).filter(User.id == current_user_id).first()
         if not current_user:
             raise HTTPException(status_code=404, detail="User not found")
@@ -982,11 +1005,11 @@ async def get_admin_stats(
 @app.get("/api/v1/admin/kyc/pending")
 async def get_pending_kyc(
     db: Session = Depends(get_db),
-    token: str = Depends(security)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Get all pending KYC verifications (admin only)."""
     try:
-        current_user_id = get_current_user_id(token)
+        current_user_id = get_current_user_id(credentials)
         current_user = db.query(User).filter(User.id == current_user_id).first()
         if not current_user:
             raise HTTPException(status_code=404, detail="User not found")
@@ -1030,11 +1053,11 @@ async def get_pending_kyc(
 async def approve_kyc(
     document_id: str,
     db: Session = Depends(get_db),
-    token: str = Depends(security)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Approve a KYC document (admin only)."""
     try:
-        current_user_id = get_current_user_id(token)
+        current_user_id = get_current_user_id(credentials)
         current_user = db.query(User).filter(User.id == current_user_id).first()
         if not current_user:
             raise HTTPException(status_code=404, detail="User not found")
@@ -1103,11 +1126,11 @@ async def reject_kyc(
     document_id: str,
     request: RejectKYCRequest,
     db: Session = Depends(get_db),
-    token: str = Depends(security)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Reject a KYC document (admin only)."""
     try:
-        current_user_id = get_current_user_id(token)
+        current_user_id = get_current_user_id(credentials)
         current_user = db.query(User).filter(User.id == current_user_id).first()
         if not current_user:
             raise HTTPException(status_code=404, detail="User not found")
@@ -1161,11 +1184,11 @@ async def reject_kyc(
 @app.get("/api/v1/admin/wallets")
 async def get_all_wallets(
     db: Session = Depends(get_db),
-    token: str = Depends(security)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Get all wallets (admin only, read-only)."""
     try:
-        current_user_id = get_current_user_id(token)
+        current_user_id = get_current_user_id(credentials)
         current_user = db.query(User).filter(User.id == current_user_id).first()
         if not current_user:
             raise HTTPException(status_code=404, detail="User not found")
@@ -1206,12 +1229,12 @@ async def get_all_wallets(
 @app.get("/api/v1/admin/transactions")
 async def get_all_transactions(
     db: Session = Depends(get_db),
-    token: str = Depends(security),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     limit: int = 100
 ):
     """Get all transactions (admin only)."""
     try:
-        current_user_id = get_current_user_id(token)
+        current_user_id = get_current_user_id(credentials)
         current_user = db.query(User).filter(User.id == current_user_id).first()
         if not current_user:
             raise HTTPException(status_code=404, detail="User not found")
@@ -1293,12 +1316,12 @@ def create_audit_log(db: Session, admin_id: str, admin_email: str, action: str, 
 @app.get("/api/v1/admin/audit-logs")
 async def get_audit_logs(
     db: Session = Depends(get_db),
-    token: str = Depends(security),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     limit: int = 100
 ):
     """Get admin audit logs (admin only)."""
     try:
-        current_user_id = get_current_user_id(token)
+        current_user_id = get_current_user_id(credentials)
         current_user = db.query(User).filter(User.id == current_user_id).first()
         if not current_user:
             raise HTTPException(status_code=404, detail="User not found")
