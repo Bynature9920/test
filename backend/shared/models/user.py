@@ -29,8 +29,8 @@ class User(BaseModel):
     is_verified = Column(Boolean, default=False, nullable=False)
     last_login = Column(DateTime(timezone=True), nullable=True)
     
-    # OAuth fields
-    google_id = Column(String(255), unique=True, nullable=True, index=True)
+    # OAuth fields (unique constraint handled at app level for NULL values)
+    google_id = Column(String(255), nullable=True, index=True)  # Removed unique=True to allow multiple NULLs
     oauth_provider = Column(String(50), nullable=True)  # 'google', 'facebook', etc.
     
     # Password reset fields
