@@ -14,6 +14,7 @@ import TravelPage from '@/pages/travel/TravelPage'
 import ProfilePage from '@/pages/profile/ProfilePage'
 import VerificationPage from '@/pages/verification/VerificationPage'
 import ChatPage from '@/pages/chat/ChatPage'
+import AdminPage from '@/pages/admin/AdminPage'
 import Layout from '@/components/layout/Layout'
 
 function AppRouter() {
@@ -67,6 +68,7 @@ function AppRouter() {
                 <Route path="/profile" element={<ProfilePage />} />
                 <Route path="/verification" element={<VerificationPage />} />
                 <Route path="/chat" element={<ChatPage />} />
+                <Route path="/admin" element={<AdminPage />} />
                 <Route path="/" element={<Navigate to="/dashboard" />} />
               </Routes>
             </Layout>

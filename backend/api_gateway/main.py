@@ -768,6 +768,55 @@ async def get_verification_status(
         )
 
 
+# Admin routes
+@app.get("/api/v1/admin/users")
+async def get_all_users(
+    db: Session = Depends(get_db),
+    token: str = Depends(security)
+):
+    """Get all users (admin only)."""
+    try:
+        current_user_id = get_current_user_id(token)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Simple admin check - you can add a proper admin role field later
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        # Get all users
+        users = db.query(User).order_by(User.created_at.desc()).all()
+        
+        return {
+            "users": [
+                {
+                    "id": str(user.id),
+                    "email": user.email,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "phone": user.phone or "",
+                    "country_code": user.country_code or "",
+                    "kyc_status": user.kyc_status.value,
+                    "is_active": user.is_active,
+                    "is_verified": user.is_verified,
+                    "created_at": user.created_at.isoformat() if user.created_at else None,
+                    "oauth_provider": user.oauth_provider or ""
+                }
+                for user in users
+            ]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get all users error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to get users"
+        )
+
+
 # Wallet routes
 @app.api_route("/api/v1/wallet/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def wallet_proxy(path: str, request: Request):

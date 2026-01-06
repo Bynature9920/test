@@ -18,13 +18,13 @@ export default function DashboardPage() {
       setBalance(data)
     } catch (error) {
       console.error('Failed to load balance:', error)
-      // Demo data if API fails
+      // Show zero balance if API fails (real accounts start at ₦0.00)
       setBalance({
-        available_balance: '50000.00',
-        pending_balance: '5000.00',
-        total_balance: '55000.00',
+        available_balance: '0.00',
+        pending_balance: '0.00',
+        total_balance: '0.00',
         currency: 'NGN',
-        crypto_value: '200000.00',
+        crypto_value: '0.00',
       })
     } finally {
       setLoading(false)
@@ -34,7 +34,7 @@ export default function DashboardPage() {
   const stats = [
     {
       name: 'Crypto Value',
-      value: balance?.crypto_value ? formatCurrency(balance.crypto_value) : '₦200,000.00',
+      value: balance?.crypto_value ? formatCurrency(balance.crypto_value) : '₦0.00',
       icon: Coins,
       color: 'text-purple-600 dark:text-purple-400',
       bgColor: 'bg-purple-50 dark:bg-purple-900/30',
