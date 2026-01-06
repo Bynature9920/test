@@ -841,6 +841,18 @@ async def suspend_user(
         
         # Suspend user
         target_user.is_active = False
+        
+        # Create audit log
+        create_audit_log(
+            db, 
+            str(current_user_id), 
+            current_user.email, 
+            "SUSPEND_USER", 
+            "user", 
+            user_id,
+            f"Suspended user {target_user.email}"
+        )
+        
         db.commit()
         
         logger.info(f"Admin {current_user.email} suspended user {user_id}")
@@ -878,6 +890,18 @@ async def activate_user(
         
         # Activate user
         target_user.is_active = True
+        
+        # Create audit log
+        create_audit_log(
+            db, 
+            str(current_user_id), 
+            current_user.email, 
+            "ACTIVATE_USER", 
+            "user", 
+            user_id,
+            f"Activated user {target_user.email}"
+        )
+        
         db.commit()
         
         logger.info(f"Admin {current_user.email} activated user {user_id}")
@@ -953,6 +977,365 @@ async def get_admin_stats(
     except Exception as e:
         logger.error(f"Get admin stats error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to get statistics")
+
+
+@app.get("/api/v1/admin/kyc/pending")
+async def get_pending_kyc(
+    db: Session = Depends(get_db),
+    token: str = Depends(security)
+):
+    """Get all pending KYC verifications (admin only)."""
+    try:
+        current_user_id = get_current_user_id(token)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        # Get pending verifications
+        pending_verifications = db.query(VerificationDocument).filter(
+            VerificationDocument.status == VerificationStatus.PENDING
+        ).order_by(VerificationDocument.submitted_at.desc()).all()
+        
+        result = []
+        for doc in pending_verifications:
+            user = db.query(User).filter(User.id == doc.user_id).first()
+            if user:
+                result.append({
+                    "document_id": str(doc.id),
+                    "user_id": str(user.id),
+                    "user_name": f"{user.first_name} {user.last_name}",
+                    "user_email": user.email,
+                    "document_type": doc.document_type,
+                    "document_side": doc.document_side,
+                    "file_url": doc.file_url,
+                    "country": doc.country,
+                    "submitted_at": doc.submitted_at.isoformat() if doc.submitted_at else None,
+                    "status": doc.status.value
+                })
+        
+        return {"pending_verifications": result}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get pending KYC error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get pending verifications")
+
+
+@app.post("/api/v1/admin/kyc/{document_id}/approve")
+async def approve_kyc(
+    document_id: str,
+    db: Session = Depends(get_db),
+    token: str = Depends(security)
+):
+    """Approve a KYC document (admin only)."""
+    try:
+        current_user_id = get_current_user_id(token)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        # Find document
+        document = db.query(VerificationDocument).filter(
+            VerificationDocument.id == document_id
+        ).first()
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Approve document
+        document.status = VerificationStatus.APPROVED
+        document.reviewed_at = datetime.utcnow()
+        document.reviewed_by = str(current_user_id)
+        
+        # Update user KYC status
+        user = db.query(User).filter(User.id == document.user_id).first()
+        if user:
+            # Check if all documents are approved
+            user_docs = db.query(VerificationDocument).filter(
+                VerificationDocument.user_id == document.user_id
+            ).all()
+            
+            all_approved = all(doc.status == VerificationStatus.APPROVED for doc in user_docs)
+            if all_approved and len(user_docs) > 0:
+                user.kyc_status = KYCStatus.VERIFIED
+                user.is_verified = True
+            else:
+                user.kyc_status = KYCStatus.IN_PROGRESS
+        
+        # Create audit log
+        create_audit_log(
+            db, 
+            str(current_user_id), 
+            current_user.email, 
+            "APPROVE_KYC", 
+            "kyc_document", 
+            document_id,
+            f"Approved {document.document_type} for user {document.user_id}"
+        )
+        
+        db.commit()
+        
+        logger.info(f"Admin {current_user.email} approved KYC document {document_id} for user {document.user_id}")
+        
+        return {"message": "KYC document approved successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Approve KYC error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to approve KYC document")
+
+
+class RejectKYCRequest(BaseModel):
+    reason: str
+
+
+@app.post("/api/v1/admin/kyc/{document_id}/reject")
+async def reject_kyc(
+    document_id: str,
+    request: RejectKYCRequest,
+    db: Session = Depends(get_db),
+    token: str = Depends(security)
+):
+    """Reject a KYC document (admin only)."""
+    try:
+        current_user_id = get_current_user_id(token)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        # Find document
+        document = db.query(VerificationDocument).filter(
+            VerificationDocument.id == document_id
+        ).first()
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Reject document
+        document.status = VerificationStatus.REJECTED
+        document.reviewed_at = datetime.utcnow()
+        document.reviewed_by = str(current_user_id)
+        document.rejection_reason = request.reason
+        
+        # Update user KYC status
+        user = db.query(User).filter(User.id == document.user_id).first()
+        if user:
+            user.kyc_status = KYCStatus.REJECTED
+        
+        # Create audit log
+        create_audit_log(
+            db, 
+            str(current_user_id), 
+            current_user.email, 
+            "REJECT_KYC", 
+            "kyc_document", 
+            document_id,
+            f"Rejected {document.document_type} for user {document.user_id}. Reason: {request.reason}"
+        )
+        
+        db.commit()
+        
+        logger.info(f"Admin {current_user.email} rejected KYC document {document_id} for user {document.user_id}")
+        
+        return {"message": "KYC document rejected"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Reject KYC error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to reject KYC document")
+
+
+@app.get("/api/v1/admin/wallets")
+async def get_all_wallets(
+    db: Session = Depends(get_db),
+    token: str = Depends(security)
+):
+    """Get all wallets (admin only, read-only)."""
+    try:
+        current_user_id = get_current_user_id(token)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        # Get all wallets
+        from shared.models.wallet import Wallet
+        wallets = db.query(Wallet).order_by(Wallet.created_at.desc()).all()
+        
+        result = []
+        for wallet in wallets:
+            user = db.query(User).filter(User.id == wallet.user_id).first()
+            if user:
+                result.append({
+                    "wallet_id": str(wallet.id),
+                    "user_id": str(user.id),
+                    "user_name": f"{user.first_name} {user.last_name}",
+                    "user_email": user.email,
+                    "currency": wallet.currency,
+                    "balance": str(wallet.balance),
+                    "status": wallet.status,
+                    "is_locked": wallet.is_locked,
+                    "created_at": wallet.created_at.isoformat() if wallet.created_at else None
+                })
+        
+        return {"wallets": result}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get all wallets error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get wallets")
+
+
+@app.get("/api/v1/admin/transactions")
+async def get_all_transactions(
+    db: Session = Depends(get_db),
+    token: str = Depends(security),
+    limit: int = 100
+):
+    """Get all transactions (admin only)."""
+    try:
+        current_user_id = get_current_user_id(token)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        # Get all transactions
+        from shared.models.transaction import Transaction
+        transactions = db.query(Transaction).order_by(
+            Transaction.created_at.desc()
+        ).limit(limit).all()
+        
+        result = []
+        for txn in transactions:
+            sender = db.query(User).filter(User.id == txn.sender_id).first() if txn.sender_id else None
+            recipient = db.query(User).filter(User.id == txn.recipient_id).first() if txn.recipient_id else None
+            
+            result.append({
+                "transaction_id": str(txn.id),
+                "sender_id": str(txn.sender_id) if txn.sender_id else None,
+                "sender_name": f"{sender.first_name} {sender.last_name}" if sender else None,
+                "recipient_id": str(txn.recipient_id) if txn.recipient_id else None,
+                "recipient_name": f"{recipient.first_name} {recipient.last_name}" if recipient else None,
+                "amount": str(txn.amount),
+                "currency": txn.currency,
+                "fee": str(txn.fee) if txn.fee else "0",
+                "type": txn.type,
+                "status": txn.status,
+                "reference": txn.reference,
+                "created_at": txn.created_at.isoformat() if txn.created_at else None
+            })
+        
+        return {"transactions": result}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get all transactions error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get transactions")
+
+
+# Create admin audit log model if it doesn't exist
+from sqlalchemy import Column, String, Text
+from shared.models.base import BaseModel as AuditBase
+
+class AdminAuditLog(AuditBase):
+    """Admin audit log model."""
+    __tablename__ = "admin_audit_logs"
+    
+    admin_id = Column(String(20), nullable=False, index=True)
+    admin_email = Column(String(255), nullable=False)
+    action = Column(String(100), nullable=False)
+    target_type = Column(String(50), nullable=True)  # user, kyc, wallet, etc.
+    target_id = Column(String(20), nullable=True)
+    details = Column(Text, nullable=True)
+    ip_address = Column(String(50), nullable=True)
+
+
+def create_audit_log(db: Session, admin_id: str, admin_email: str, action: str, target_type: str = None, target_id: str = None, details: str = None):
+    """Helper function to create audit log entries."""
+    try:
+        log = AdminAuditLog(
+            admin_id=admin_id,
+            admin_email=admin_email,
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            details=details
+        )
+        db.add(log)
+        db.commit()
+    except Exception as e:
+        logger.error(f"Failed to create audit log: {str(e)}")
+        db.rollback()
+
+
+@app.get("/api/v1/admin/audit-logs")
+async def get_audit_logs(
+    db: Session = Depends(get_db),
+    token: str = Depends(security),
+    limit: int = 100
+):
+    """Get admin audit logs (admin only)."""
+    try:
+        current_user_id = get_current_user_id(token)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        # Create table if it doesn't exist
+        from shared.database import engine
+        AdminAuditLog.__table__.create(engine, checkfirst=True)
+        
+        # Get audit logs
+        logs = db.query(AdminAuditLog).order_by(
+            AdminAuditLog.created_at.desc()
+        ).limit(limit).all()
+        
+        result = []
+        for log in logs:
+            result.append({
+                "log_id": str(log.id),
+                "admin_id": log.admin_id,
+                "admin_email": log.admin_email,
+                "action": log.action,
+                "target_type": log.target_type,
+                "target_id": log.target_id,
+                "details": log.details,
+                "timestamp": log.created_at.isoformat() if log.created_at else None
+            })
+        
+        return {"logs": result}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get audit logs error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get audit logs")
 
 
 # Wallet routes
