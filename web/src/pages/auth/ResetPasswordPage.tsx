@@ -1,11 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
-import { useTheme } from '@/contexts/ThemeContext'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import toast from 'react-hot-toast'
-import { Sun, Moon, ArrowLeft } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { authService } from '@/services/api/authService'
 
 const resetPasswordSchema = z
@@ -23,7 +22,6 @@ type ResetPasswordFormData = z.infer<typeof resetPasswordSchema>
 export default function ResetPasswordPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const { theme, toggleTheme } = useTheme()
   const [isLoading, setIsLoading] = useState(false)
   const [token, setToken] = useState<string | null>(null)
   const [passwordReset, setPasswordReset] = useState(false)
@@ -56,7 +54,7 @@ export default function ResetPasswordPage() {
     try {
       await authService.resetPassword(token, data.password)
       setPasswordReset(true)
-      toast.success('Password reset successfully!')
+      // Silent redirect without toast
       setTimeout(() => {
         navigate('/login')
       }, 2000)
@@ -74,19 +72,6 @@ export default function ResetPasswordPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-500 to-primary-700 dark:from-primary-600 dark:to-primary-900 px-4 py-12 relative">
-      <button
-        type="button"
-        onClick={toggleTheme}
-        className="absolute top-4 right-4 flex items-center justify-center w-10 h-10 rounded-lg bg-white/20 dark:bg-gray-900/20 hover:bg-white/30 dark:hover:bg-gray-900/30 backdrop-blur-sm transition-colors cursor-pointer active:scale-95 z-50"
-        title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-        aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-      >
-        {theme === 'light' ? (
-          <Moon className="w-5 h-5 text-white" />
-        ) : (
-          <Sun className="w-5 h-5 text-white" />
-        )}
-      </button>
       <div className="max-w-md w-full bg-white dark:bg-gray-900 rounded-lg shadow-xl p-8 border border-gray-200 dark:border-gray-800">
         <Link
           to="/login"
@@ -171,7 +156,7 @@ export default function ResetPasswordPage() {
               disabled={isLoading}
               className="w-full btn-primary py-3 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isLoading ? 'Resetting...' : 'Reset Password'}
+              {isLoading ? 'Confirming...' : 'Confirm'}
             </button>
           </form>
         )}

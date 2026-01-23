@@ -62,8 +62,10 @@ def send_email(
             return True
         else:
             # In development, just log the email
-            logger.warning(f"SMTP not configured. Would send email to {to_email}: {subject}")
-            logger.info(f"Email content:\n{html_body}")
+            logger.warning(f"⚠️  SMTP not configured. Email not actually sent to {to_email}")
+            logger.warning(f"📧 Subject: {subject}")
+            logger.warning(f"📄 Email content (see below):")
+            logger.warning(f"\n{'-'*80}\n{text_body if text_body else html_body}\n{'-'*80}\n")
             return True  # Return True in dev mode
             
     except Exception as e:

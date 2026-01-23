@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { hotelService } from '@/services/api/hotelService'
 import { flightService } from '@/services/api/flightService'
 import { formatCurrency } from '@/utils/format'
-import { Calendar, Users, MapPin, Star, Search, Bed, Plane, Clock, ArrowRight } from 'lucide-react'
+import { Calendar, Users, MapPin, Star, Search, Bed, Plane, Clock, ArrowRight, Sparkles } from 'lucide-react'
 import FlightSearchSection from './FlightSearchSection'
 import toast from 'react-hot-toast'
 import { useForm } from 'react-hook-form'
@@ -234,48 +234,57 @@ export default function TravelPage() {
   const checkOutDate = watch('checkOutDate')
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-3xl font-bold text-gray-900 dark:text-slate-100">Travel</h2>
-        <p className="text-gray-600 dark:text-slate-400 mt-1">Search and book hotels and flights in real-time</p>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 pb-24">
+      {/* Premium Header */}
+      <div className="bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600 dark:from-blue-900 dark:via-indigo-950 dark:to-purple-950 text-white p-6 md:p-8 rounded-b-3xl shadow-xl mb-6">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles className="w-5 h-5 text-yellow-300 animate-pulse" />
+            <h2 className="text-2xl md:text-3xl font-bold">Travel</h2>
+          </div>
+          <p className="text-white/80">Search and book hotels and flights in real-time</p>
+        </div>
       </div>
 
-      <div className="card">
-        <div className="flex gap-4 border-b border-gray-200 dark:border-slate-700 mb-6">
-          <button
-            onClick={() => setActiveTab('hotels')}
-            className={`px-4 py-2 font-medium transition-colors ${
-              activeTab === 'hotels'
-                ? 'text-primary-600 dark:text-primary-400 border-b-2 border-primary-600 dark:border-primary-400'
-                : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200'
-            }`}
-          >
-            <Bed className="w-4 h-4 inline mr-2" />
-            Hotels
-          </button>
-          <button
-            onClick={() => setActiveTab('flights')}
-            className={`px-4 py-2 font-medium transition-colors ${
-              activeTab === 'flights'
-                ? 'text-primary-600 dark:text-primary-400 border-b-2 border-primary-600 dark:border-primary-400'
-                : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200'
-            }`}
-          >
-            <Plane className="w-4 h-4 inline mr-2" />
-            Flights
-          </button>
-          <button
-            onClick={() => setActiveTab('reservations')}
-            className={`px-4 py-2 font-medium transition-colors ${
-              activeTab === 'reservations'
-                ? 'text-primary-600 dark:text-primary-400 border-b-2 border-primary-600 dark:border-primary-400'
-                : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200'
-            }`}
-          >
-            <Calendar className="w-4 h-4 inline mr-2" />
-            My Bookings
-          </button>
-        </div>
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 -mt-4">
+        <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden">
+          <div className="flex gap-2 p-2 bg-gray-50 dark:bg-gray-800">
+            <button
+              onClick={() => setActiveTab('hotels')}
+              className={`flex-1 px-4 py-3 font-medium rounded-xl transition-all transform ${
+                activeTab === 'hotels'
+                  ? 'bg-gradient-to-r from-primary-500 to-primary-600 text-white shadow-lg scale-105'
+                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white'
+              }`}
+            >
+              <Bed className="w-4 h-4 inline mr-2" />
+              Hotels
+            </button>
+            <button
+              onClick={() => setActiveTab('flights')}
+              className={`flex-1 px-4 py-3 font-medium rounded-xl transition-all transform ${
+                activeTab === 'flights'
+                  ? 'bg-gradient-to-r from-primary-500 to-primary-600 text-white shadow-lg scale-105'
+                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white'
+              }`}
+            >
+              <Plane className="w-4 h-4 inline mr-2" />
+              Flights
+            </button>
+            <button
+              onClick={() => setActiveTab('reservations')}
+              className={`flex-1 px-4 py-3 font-medium rounded-xl transition-all transform ${
+                activeTab === 'reservations'
+                  ? 'bg-gradient-to-r from-primary-500 to-primary-600 text-white shadow-lg scale-105'
+                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white'
+              }`}
+            >
+              <Calendar className="w-4 h-4 inline mr-2" />
+              My Bookings
+            </button>
+          </div>
+        
+          <div className="p-6">
 
         {activeTab === 'hotels' && (
           <div className="space-y-6">
@@ -357,9 +366,19 @@ export default function TravelPage() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="btn-primary w-full md:w-auto px-8"
+                  className="w-full md:w-auto px-8 py-3 bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
                 >
-                  {loading ? 'Searching...' : 'Search Hotels'}
+                  {loading ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                      Searching...
+                    </>
+                  ) : (
+                    <>
+                      <Search className="w-5 h-5" />
+                      Search Hotels
+                    </>
+                  )}
                 </button>
               </div>
             </form>
@@ -373,7 +392,7 @@ export default function TravelPage() {
                   {hotels.map((hotel) => (
                     <div
                       key={hotel.hotelId}
-                      className="border border-gray-200 dark:border-slate-700 rounded-lg overflow-hidden hover:shadow-lg dark:hover:shadow-slate-900/50 transition-shadow"
+                      className="border-2 border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden hover:shadow-2xl hover:border-primary-500 dark:hover:border-primary-500 transition-all transform hover:scale-102 bg-white dark:bg-gray-800"
                     >
                       {/* Hotel Image - Real-time from Unsplash */}
                       <div className="relative h-48 bg-gray-200">
@@ -452,9 +471,10 @@ export default function TravelPage() {
                           </div>
                           <button
                             onClick={() => handleViewDetails(hotel.hotelId)}
-                            className="btn-primary text-sm px-4 py-2"
+                            className="bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 text-white font-semibold text-sm px-4 py-2 rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:scale-105 flex items-center gap-2"
                           >
                             View Details
+                            <ArrowRight className="w-4 h-4" />
                           </button>
                         </div>
                       </div>
@@ -484,10 +504,12 @@ export default function TravelPage() {
                 <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
               </div>
             ) : reservations.length === 0 ? (
-              <div className="text-center py-12 text-gray-500 dark:text-slate-400">
-                <Calendar className="w-16 h-16 mx-auto mb-4 text-gray-400" />
-                <p>No bookings yet</p>
-                <p className="text-sm mt-2">Your hotel and flight bookings will appear here</p>
+              <div className="text-center py-12">
+                <div className="w-20 h-20 mx-auto bg-gradient-to-br from-blue-100 to-indigo-100 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-full flex items-center justify-center mb-4">
+                  <Calendar className="w-10 h-10 text-blue-600 dark:text-blue-400" />
+                </div>
+                <p className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No bookings yet</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Your hotel and flight bookings will appear here</p>
               </div>
             ) : (
               <div className="space-y-4">
@@ -574,7 +596,9 @@ export default function TravelPage() {
             )}
           </div>
         )}
+        </div>
       </div>
+    </div>
 
       {/* Hotel Details Modal */}
       {showHotelDetails && selectedHotel && (

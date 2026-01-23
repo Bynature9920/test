@@ -50,6 +50,12 @@ class TransactionRequest(BaseModel):
     reference: Optional[str] = None
 
 
+class SendToUserRequest(BaseModel):
+    recipient_user_id: str
+    amount: Decimal
+    description: Optional[str] = None
+
+
 def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
     """Extract user ID from JWT token."""
     token = credentials.credentials
@@ -133,6 +139,139 @@ async def get_transactions(
         "limit": limit,
         "total": 0
     }
+
+
+@app.post("/api/v1/wallet/send-to-user")
+async def send_to_user(
+    request: SendToUserRequest,
+    sender_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    """Send money to another user."""
+    from shared.models.user import User
+    from shared.models.wallet import Wallet
+    from shared.models.transaction import Transaction, TransactionStatus, TransactionType
+    import uuid
+    
+    # Validate amount
+    if request.amount <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Amount must be greater than 0"
+        )
+    
+    if request.amount < Decimal("100.00"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Minimum transfer amount is ₦100.00"
+        )
+    
+    # Check if sender is trying to send to themselves
+    if request.recipient_user_id == sender_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot send money to yourself"
+        )
+    
+    # Verify recipient exists
+    recipient = db.query(User).filter(User.user_id == request.recipient_user_id).first()
+    if not recipient:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Recipient user not found"
+        )
+    
+    # Get sender's wallet
+    sender_wallet = db.query(Wallet).filter(
+        Wallet.user_id == sender_id,
+        Wallet.currency == "NGN"
+    ).first()
+    
+    if not sender_wallet:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Sender wallet not found"
+        )
+    
+    # Check sender has sufficient balance
+    if sender_wallet.balance < request.amount:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Insufficient balance"
+        )
+    
+    # Get or create recipient's wallet
+    recipient_wallet = db.query(Wallet).filter(
+        Wallet.user_id == request.recipient_user_id,
+        Wallet.currency == "NGN"
+    ).first()
+    
+    if not recipient_wallet:
+        # Create wallet for recipient if it doesn't exist
+        recipient_wallet = Wallet(
+            wallet_id=str(uuid.uuid4()),
+            user_id=request.recipient_user_id,
+            currency="NGN",
+            balance=Decimal("0.00"),
+            created_at=datetime.utcnow()
+        )
+        db.add(recipient_wallet)
+    
+    # Create transaction record
+    transaction_id = str(uuid.uuid4())
+    
+    # Deduct from sender
+    sender_wallet.balance -= request.amount
+    
+    # Add to recipient
+    recipient_wallet.balance += request.amount
+    
+    # Create sender transaction record (debit)
+    sender_transaction = Transaction(
+        transaction_id=f"{transaction_id}_debit",
+        user_id=sender_id,
+        transaction_type=TransactionType.TRANSFER_OUT,
+        status=TransactionStatus.COMPLETED,
+        amount=-request.amount,  # Negative for debit
+        currency="NGN",
+        description=request.description or f"Transfer to {recipient.email}",
+        created_at=datetime.utcnow()
+    )
+    db.add(sender_transaction)
+    
+    # Create recipient transaction record (credit)
+    recipient_transaction = Transaction(
+        transaction_id=f"{transaction_id}_credit",
+        user_id=request.recipient_user_id,
+        transaction_type=TransactionType.TRANSFER_IN,
+        status=TransactionStatus.COMPLETED,
+        amount=request.amount,  # Positive for credit
+        currency="NGN",
+        description=request.description or f"Transfer from {sender_id}",
+        created_at=datetime.utcnow()
+    )
+    db.add(recipient_transaction)
+    
+    try:
+        db.commit()
+        db.refresh(sender_wallet)
+        
+        logger.info(f"User {sender_id} sent ₦{request.amount} to {request.recipient_user_id}")
+        
+        return {
+            "message": "Transfer completed successfully",
+            "transaction_id": transaction_id,
+            "recipient_user_id": request.recipient_user_id,
+            "amount": str(request.amount),
+            "new_balance": str(sender_wallet.balance)
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to complete transfer: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to complete transfer"
+        )
 
 
 @app.post("/api/v1/wallet/ledger/entry")

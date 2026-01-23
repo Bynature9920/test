@@ -20,7 +20,7 @@ from shared.models.verification import VerificationDocument, VerificationStatus
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import secrets
 from shared.utils.email import send_password_reset_email
 
@@ -237,7 +237,7 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)):
             first_name=user_data.first_name,
             last_name=user_data.last_name,
             country_code=user_data.country_code,
-            kyc_status=KYCStatus.PENDING,
+            kyc_status=KYCStatus.NOT_STARTED,
             is_active=True,
             is_verified=False
         )
@@ -287,14 +287,14 @@ async def login(credentials: UserLogin, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(
             status_code=401,
-            detail="Invalid email or password"
+            detail="No existing account for this email"
         )
     
     # Verify password
     if not verify_password(credentials.password, user.password_hash):
         raise HTTPException(
             status_code=401,
-            detail="Invalid email or password"
+            detail="Incorrect password"
         )
     
     # Check if user is active
@@ -435,7 +435,7 @@ async def google_oauth(oauth_data: GoogleOAuthRequest, db: Session = Depends(get
                     first_name=first_name,
                     last_name=last_name,
                     country_code="NG",
-                    kyc_status=KYCStatus.PENDING,
+                    kyc_status=KYCStatus.NOT_STARTED,
                     is_active=True,
                     is_verified=google_user.get("email_verified", False),
                     phone=None,  # Can be added later
@@ -486,15 +486,21 @@ async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(
         # Find user by email
         user = db.query(User).filter(User.email == request.email).first()
         
-        # Always return success (security: don't reveal if email exists)
+        # Return specific error if email doesn't exist
         if not user:
             logger.warning(f"Password reset requested for non-existent email: {request.email}")
-            return {"message": "If the email exists, a password reset link has been sent."}
+            raise HTTPException(
+                status_code=404,
+                detail="No existing account for this email"
+            )
         
         # Check if user has password (OAuth users can't reset password)
         if not user.password_hash:
             logger.warning(f"Password reset requested for OAuth user: {request.email}")
-            return {"message": "If the email exists, a password reset link has been sent."}
+            raise HTTPException(
+                status_code=400,
+                detail="This account uses Google sign-in. Password reset is not available."
+            )
         
         # Generate reset token
         reset_token = secrets.token_urlsafe(32)
@@ -529,7 +535,16 @@ async def reset_password(request: ResetPasswordRequest, db: Session = Depends(ge
             )
         
         # Check if token expired
-        if not user.reset_token_expires or user.reset_token_expires < datetime.utcnow():
+        current_time = datetime.utcnow()
+        token_expires = user.reset_token_expires
+        
+        # Handle timezone-aware datetime comparison
+        if token_expires and hasattr(token_expires, 'tzinfo') and token_expires.tzinfo is not None:
+            # If token_expires is timezone-aware, make current_time timezone-aware too
+            current_time = datetime.now(timezone.utc).replace(tzinfo=None)
+            token_expires = token_expires.replace(tzinfo=None)
+        
+        if not user.reset_token_expires or token_expires < current_time:
             # Clear expired token
             user.reset_token = None
             user.reset_token_expires = None
@@ -938,6 +953,118 @@ async def activate_user(
         raise HTTPException(status_code=500, detail="Failed to activate user")
 
 
+@app.post("/api/v1/admin/wallets/freeze/{user_id}")
+async def freeze_user_wallets(
+    user_id: str,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Freeze all wallets for a user (admin only)."""
+    try:
+        current_user_id = get_current_user_id(credentials)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="Current user not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        # Find target user
+        target_user = db.query(User).filter(User.id == user_id).first()
+        if not target_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Freeze all user wallets
+        from shared.models.wallet import Wallet
+        wallets = db.query(Wallet).filter(Wallet.user_id == user_id).all()
+        
+        if not wallets:
+            raise HTTPException(status_code=404, detail="No wallets found for this user")
+        
+        for wallet in wallets:
+            wallet.is_locked = True
+        
+        # Create audit log
+        create_audit_log(
+            db, 
+            str(current_user_id), 
+            current_user.email, 
+            "FREEZE_WALLETS", 
+            "user", 
+            user_id,
+            f"Froze {len(wallets)} wallet(s) for user {target_user.email}"
+        )
+        
+        db.commit()
+        
+        logger.info(f"Admin {current_user.email} froze {len(wallets)} wallet(s) for user {user_id}")
+        
+        return {"message": f"Successfully froze {len(wallets)} wallet(s)"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Freeze wallets error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to freeze wallets")
+
+
+@app.post("/api/v1/admin/wallets/unfreeze/{user_id}")
+async def unfreeze_user_wallets(
+    user_id: str,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Unfreeze all wallets for a user (admin only)."""
+    try:
+        current_user_id = get_current_user_id(credentials)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="Current user not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        # Find target user
+        target_user = db.query(User).filter(User.id == user_id).first()
+        if not target_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Unfreeze all user wallets
+        from shared.models.wallet import Wallet
+        wallets = db.query(Wallet).filter(Wallet.user_id == user_id).all()
+        
+        if not wallets:
+            raise HTTPException(status_code=404, detail="No wallets found for this user")
+        
+        for wallet in wallets:
+            wallet.is_locked = False
+        
+        # Create audit log
+        create_audit_log(
+            db, 
+            str(current_user_id), 
+            current_user.email, 
+            "UNFREEZE_WALLETS", 
+            "user", 
+            user_id,
+            f"Unfroze {len(wallets)} wallet(s) for user {target_user.email}"
+        )
+        
+        db.commit()
+        
+        logger.info(f"Admin {current_user.email} unfroze {len(wallets)} wallet(s) for user {user_id}")
+        
+        return {"message": f"Successfully unfroze {len(wallets)} wallet(s)"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unfreeze wallets error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to unfreeze wallets")
+
+
 @app.get("/api/v1/admin/stats")
 async def get_admin_stats(
     db: Session = Depends(get_db),
@@ -960,10 +1087,12 @@ async def get_admin_stats(
         
         total_users = db.query(User).count()
         active_users = db.query(User).filter(User.is_active == True).count()
+        # Only count users who have submitted documents (PENDING or IN_PROGRESS)
         pending_kyc = db.query(User).filter(
             (User.kyc_status == KYCStatus.PENDING) | 
             (User.kyc_status == KYCStatus.IN_PROGRESS)
         ).count()
+        not_started_kyc = db.query(User).filter(User.kyc_status == KYCStatus.NOT_STARTED).count()
         
         total_transactions = db.query(Transaction).count()
         
@@ -988,6 +1117,7 @@ async def get_admin_stats(
             "total_users": total_users,
             "active_users": active_users,
             "pending_kyc": pending_kyc,
+            "not_started_kyc": not_started_kyc,
             "total_transactions": total_transactions,
             "total_volume": total_volume,
             "pending_transactions": pending_transactions,
@@ -1251,12 +1381,12 @@ async def get_all_transactions(
         
         result = []
         for txn in transactions:
-            sender = db.query(User).filter(User.id == txn.sender_id).first() if txn.sender_id else None
+            sender = db.query(User).filter(User.id == txn.user_id).first() if txn.user_id else None
             recipient = db.query(User).filter(User.id == txn.recipient_id).first() if txn.recipient_id else None
             
             result.append({
                 "transaction_id": str(txn.id),
-                "sender_id": str(txn.sender_id) if txn.sender_id else None,
+                "sender_id": str(txn.user_id) if txn.user_id else None,
                 "sender_name": f"{sender.first_name} {sender.last_name}" if sender else None,
                 "recipient_id": str(txn.recipient_id) if txn.recipient_id else None,
                 "recipient_name": f"{recipient.first_name} {recipient.last_name}" if recipient else None,
@@ -1277,6 +1407,384 @@ async def get_all_transactions(
         logger.error(f"Get all transactions error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to get transactions")
 
+
+@app.get("/api/v1/admin/cards")
+async def get_all_cards(
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Get all virtual cards (admin only)."""
+    try:
+        current_user_id = get_current_user_id(credentials)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        # Get all cards
+        from shared.models.card import Card
+        cards = db.query(Card).order_by(Card.created_at.desc()).all()
+        
+        result = []
+        for card in cards:
+            user = db.query(User).filter(User.id == card.user_id).first()
+            if user:
+                result.append({
+                    "card_id": str(card.id),
+                    "user_id": str(user.id),
+                    "user_name": f"{user.first_name} {user.last_name}",
+                    "user_email": user.email,
+                    "card_number": card.card_number,
+                    "cardholder_name": card.cardholder_name,
+                    "card_type": card.card_type,
+                    "status": card.status,
+                    "currency": card.currency,
+                    "balance": str(card.balance),
+                    "expiry_month": card.expiry_month,
+                    "expiry_year": card.expiry_year,
+                    "created_at": card.created_at.isoformat() if card.created_at else None
+                })
+        
+        return {"cards": result}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get all cards error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get cards")
+
+
+@app.post("/api/v1/admin/cards/{card_id}/freeze")
+async def admin_freeze_card(
+    card_id: str,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Freeze a card (admin only)."""
+    try:
+        current_user_id = get_current_user_id(credentials)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        from shared.models.card import Card, CardStatus
+        card = db.query(Card).filter(Card.id == card_id).first()
+        if not card:
+            raise HTTPException(status_code=404, detail="Card not found")
+        
+        card.status = CardStatus.BLOCKED
+        db.commit()
+        
+        # Create audit log
+        create_audit_log(db, current_user_id, current_user.email, f"Froze card", "card", card_id, f"Card {card.card_number[-4:]} frozen")
+        
+        return {"message": "Card frozen successfully", "status": card.status}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Admin freeze card error: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to freeze card")
+
+
+@app.post("/api/v1/admin/cards/{card_id}/unfreeze")
+async def admin_unfreeze_card(
+    card_id: str,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Unfreeze a card (admin only)."""
+    try:
+        current_user_id = get_current_user_id(credentials)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        from shared.models.card import Card, CardStatus
+        card = db.query(Card).filter(Card.id == card_id).first()
+        if not card:
+            raise HTTPException(status_code=404, detail="Card not found")
+        
+        card.status = CardStatus.ACTIVE
+        db.commit()
+        
+        # Create audit log
+        create_audit_log(db, current_user_id, current_user.email, f"Unfroze card", "card", card_id, f"Card {card.card_number[-4:]} unfrozen")
+        
+        return {"message": "Card unfrozen successfully", "status": card.status}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Admin unfreeze card error: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to unfreeze card")
+
+
+@app.delete("/api/v1/admin/cards/{card_id}")
+async def admin_delete_card(
+    card_id: str,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Delete a card (admin only)."""
+    try:
+        current_user_id = get_current_user_id(credentials)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        from shared.models.card import Card
+        from shared.models.wallet import Wallet
+        
+        card = db.query(Card).filter(Card.id == card_id).first()
+        if not card:
+            raise HTTPException(status_code=404, detail="Card not found")
+        
+        card_number_last4 = card.card_number[-4:]
+        
+        # If card has balance, refund to wallet
+        if float(card.balance) > 0:
+            wallet = db.query(Wallet).filter(
+                Wallet.user_id == card.user_id,
+                Wallet.currency == card.currency
+            ).first()
+            
+            if wallet:
+                wallet.balance = float(wallet.balance) + float(card.balance)
+        
+        db.delete(card)
+        db.commit()
+        
+        # Create audit log
+        create_audit_log(db, current_user_id, current_user.email, f"Deleted card", "card", card_id, f"Card ending in {card_number_last4} deleted")
+        
+        return {"message": "Card deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Admin delete card error: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to delete card")
+
+
+@app.get("/api/v1/admin/crypto/balances")
+async def get_all_crypto_balances(
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Get all crypto balances (admin only)."""
+    try:
+        current_user_id = get_current_user_id(credentials)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        # Get all crypto balances
+        from shared.models.crypto import CryptoBalance
+        balances = db.query(CryptoBalance).order_by(CryptoBalance.created_at.desc()).all()
+        
+        result = []
+        for balance in balances:
+            user = db.query(User).filter(User.id == balance.user_id).first()
+            if user:
+                result.append({
+                    "balance_id": str(balance.id),
+                    "user_id": str(user.id),
+                    "user_name": f"{user.first_name} {user.last_name}",
+                    "user_email": user.email,
+                    "currency": balance.currency,
+                    "balance": str(balance.balance),
+                    "created_at": balance.created_at.isoformat() if balance.created_at else None
+                })
+        
+        return {"balances": result}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get all crypto balances error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get crypto balances")
+
+
+@app.get("/api/v1/admin/crypto/transactions")
+async def get_all_crypto_transactions(
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    limit: int = 100
+):
+    """Get all crypto transactions (admin only)."""
+    try:
+        current_user_id = get_current_user_id(credentials)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        # Get all crypto transactions
+        from shared.models.crypto import CryptoTransaction
+        transactions = db.query(CryptoTransaction).order_by(
+            CryptoTransaction.created_at.desc()
+        ).limit(limit).all()
+        
+        result = []
+        for txn in transactions:
+            user = db.query(User).filter(User.id == txn.user_id).first()
+            
+            result.append({
+                "transaction_id": str(txn.id),
+                "user_id": str(txn.user_id),
+                "user_name": f"{user.first_name} {user.last_name}" if user else None,
+                "user_email": user.email if user else None,
+                "transaction_type": txn.transaction_type,
+                "currency": txn.currency,
+                "amount": str(txn.amount),
+                "ngn_amount": str(txn.ngn_amount) if txn.ngn_amount else None,
+                "exchange_rate": str(txn.exchange_rate) if txn.exchange_rate else None,
+                "status": txn.status,
+                "wallet_address": txn.wallet_address,
+                "blockchain_tx_hash": txn.blockchain_tx_hash,
+                "confirmations": txn.confirmations,
+                "created_at": txn.created_at.isoformat() if txn.created_at else None
+            })
+        
+        return {"transactions": result}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get all crypto transactions error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get crypto transactions")
+
+
+@app.get("/api/v1/admin/crypto/wallets")
+async def get_all_crypto_wallets(
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Get all crypto wallets (admin only)."""
+    try:
+        current_user_id = get_current_user_id(credentials)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        # Get all crypto wallets
+        from shared.models.crypto import CryptoWallet
+        wallets = db.query(CryptoWallet).order_by(CryptoWallet.created_at.desc()).all()
+        
+        result = []
+        for wallet in wallets:
+            user = db.query(User).filter(User.id == wallet.user_id).first()
+            if user:
+                result.append({
+                    "wallet_id": str(wallet.id),
+                    "user_id": str(user.id),
+                    "user_name": f"{user.first_name} {user.last_name}",
+                    "user_email": user.email,
+                    "currency": wallet.currency,
+                    "address": wallet.address,
+                    "is_active": wallet.is_active,
+                    "created_at": wallet.created_at.isoformat() if wallet.created_at else None
+                })
+        
+        return {"wallets": result}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get all crypto wallets error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get crypto wallets")
+
+
+@app.get("/api/v1/admin/crypto/stats")
+async def get_crypto_stats(
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Get crypto statistics (admin only)."""
+    try:
+        current_user_id = get_current_user_id(credentials)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        from shared.models.crypto import CryptoBalance, CryptoTransaction, CryptoWallet
+        from sqlalchemy import func
+        
+        # Total crypto balances by currency
+        total_balances = db.query(
+            CryptoBalance.currency,
+            func.sum(CryptoBalance.balance).label('total')
+        ).group_by(CryptoBalance.currency).all()
+        
+        # Total transactions
+        total_transactions = db.query(CryptoTransaction).count()
+        
+        # Pending transactions
+        pending_transactions = db.query(CryptoTransaction).filter(
+            CryptoTransaction.status == 'PENDING'
+        ).count()
+        
+        # Total wallets
+        total_wallets = db.query(CryptoWallet).count()
+        
+        # Recent conversions total (last 30 days)
+        from datetime import datetime, timedelta
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+        recent_conversions = db.query(
+            func.sum(CryptoTransaction.ngn_amount)
+        ).filter(
+            CryptoTransaction.transaction_type == 'CONVERT',
+            CryptoTransaction.created_at >= thirty_days_ago
+        ).scalar() or 0
+        
+        return {
+            "total_balances": {str(curr): str(total) for curr, total in total_balances},
+            "total_transactions": total_transactions,
+            "pending_transactions": pending_transactions,
+            "total_wallets": total_wallets,
+            "recent_conversions_ngn": str(recent_conversions)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get crypto stats error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get crypto stats")
+
+
+# Import risk models
+from shared.models.risk import RiskAlert, RiskLevel, AlertStatus
 
 # Create admin audit log model if it doesn't exist
 from sqlalchemy import Column, String, Text
@@ -1361,7 +1869,780 @@ async def get_audit_logs(
         raise HTTPException(status_code=500, detail="Failed to get audit logs")
 
 
-# Wallet routes
+@app.get("/api/v1/admin/risk/alerts")
+async def get_risk_alerts(
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    status: Optional[str] = None,
+    risk_level: Optional[str] = None,
+    limit: int = 100
+):
+    """Get risk and fraud alerts (admin only)."""
+    try:
+        current_user_id = get_current_user_id(credentials)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        # Create table if it doesn't exist
+        from shared.database import engine
+        RiskAlert.__table__.create(engine, checkfirst=True)
+        
+        # Build query
+        query = db.query(RiskAlert)
+        
+        if status:
+            query = query.filter(RiskAlert.status == status)
+        
+        if risk_level:
+            query = query.filter(RiskAlert.risk_level == risk_level)
+        
+        alerts = query.order_by(RiskAlert.created_at.desc()).limit(limit).all()
+        
+        result = []
+        for alert in alerts:
+            user = None
+            if alert.user_id:
+                user = db.query(User).filter(User.id == alert.user_id).first()
+            
+            result.append({
+                "alert_id": str(alert.id),
+                "user_id": str(alert.user_id) if alert.user_id else None,
+                "user_name": f"{user.first_name} {user.last_name}" if user else None,
+                "user_email": user.email if user else None,
+                "alert_type": alert.alert_type,
+                "risk_level": alert.risk_level.value,
+                "status": alert.status.value,
+                "description": alert.description,
+                "amount": str(alert.amount) if alert.amount else None,
+                "ip_address": alert.ip_address,
+                "resolved_by": alert.resolved_by,
+                "notes": alert.notes,
+                "created_at": alert.created_at.isoformat() if alert.created_at else None
+            })
+        
+        return {"alerts": result}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get risk alerts error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get risk alerts")
+
+
+@app.get("/api/v1/admin/risk/stats")
+async def get_risk_stats(
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Get risk and fraud statistics (admin only)."""
+    try:
+        current_user_id = get_current_user_id(credentials)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        # Create table if it doesn't exist
+        from shared.database import engine
+        RiskAlert.__table__.create(engine, checkfirst=True)
+        
+        # Calculate stats
+        total_alerts = db.query(RiskAlert).count()
+        open_alerts = db.query(RiskAlert).filter(RiskAlert.status == AlertStatus.OPEN).count()
+        critical_alerts = db.query(RiskAlert).filter(RiskAlert.risk_level == RiskLevel.CRITICAL).count()
+        high_alerts = db.query(RiskAlert).filter(RiskAlert.risk_level == RiskLevel.HIGH).count()
+        resolved_alerts = db.query(RiskAlert).filter(RiskAlert.status == AlertStatus.RESOLVED).count()
+        false_positives = db.query(RiskAlert).filter(RiskAlert.status == AlertStatus.FALSE_POSITIVE).count()
+        
+        return {
+            "total_alerts": total_alerts,
+            "open_alerts": open_alerts,
+            "critical_alerts": critical_alerts,
+            "high_alerts": high_alerts,
+            "resolved_alerts": resolved_alerts,
+            "false_positives": false_positives
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get risk stats error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get risk statistics")
+
+
+class UpdateAlertStatusRequest(BaseModel):
+    status: str  # OPEN, INVESTIGATING, RESOLVED, FALSE_POSITIVE
+    notes: Optional[str] = None
+
+
+@app.post("/api/v1/admin/risk/alerts/{alert_id}/update")
+async def update_risk_alert(
+    alert_id: str,
+    request: UpdateAlertStatusRequest,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Update risk alert status (admin only)."""
+    try:
+        current_user_id = get_current_user_id(credentials)
+        current_user = db.query(User).filter(User.id == current_user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Admin check
+        if current_user.email not in ['admin@bengo.com', 'emzzygee000@gmail.com']:
+            raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+        
+        # Find alert
+        alert = db.query(RiskAlert).filter(RiskAlert.id == alert_id).first()
+        if not alert:
+            raise HTTPException(status_code=404, detail="Alert not found")
+        
+        # Update status
+        alert.status = AlertStatus[request.status]
+        if request.notes:
+            alert.notes = request.notes
+        alert.resolved_by = str(current_user_id)
+        alert.resolved_at = datetime.utcnow().isoformat()
+        
+        # Create audit log
+        create_audit_log(
+            db, 
+            str(current_user_id), 
+            current_user.email, 
+            f"UPDATE_RISK_ALERT_{request.status}", 
+            "risk_alert", 
+            alert_id,
+            f"Updated risk alert to {request.status}. Notes: {request.notes or 'None'}"
+        )
+        
+        db.commit()
+        
+        logger.info(f"Admin {current_user.email} updated risk alert {alert_id} to {request.status}")
+        
+        return {"message": "Alert updated successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Update risk alert error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to update alert")
+
+
+# ========== P2P MONEY TRANSFER ENDPOINT ==========
+
+class P2PTransferRequest(BaseModel):
+    recipient_identifier: str  # Can be email, phone, or user ID
+    amount: float
+    description: Optional[str] = "P2P Transfer"
+    pin: Optional[str] = None  # Optional PIN for security
+
+
+@app.post("/api/v1/payments/p2p-transfer")
+async def p2p_transfer(
+    request: P2PTransferRequest,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Transfer money from one BenGo user to another."""
+    try:
+        # Get current user (sender)
+        sender_id = get_current_user_id(credentials)
+        sender = db.query(User).filter(User.id == sender_id).first()
+        if not sender:
+            raise HTTPException(status_code=404, detail="Sender not found")
+        
+        # Validate amount
+        if request.amount <= 0:
+            raise HTTPException(status_code=400, detail="Amount must be greater than 0")
+        
+        if request.amount > 5000000:  # ₦5M limit per transaction
+            raise HTTPException(status_code=400, detail="Amount exceeds transaction limit of ₦5,000,000")
+        
+        # Find recipient by email, phone, or ID
+        recipient = None
+        if '@' in request.recipient_identifier:
+            # Search by email
+            recipient = db.query(User).filter(User.email == request.recipient_identifier).first()
+        elif request.recipient_identifier.isdigit():
+            # Search by ID or phone
+            recipient = db.query(User).filter(
+                (User.id == request.recipient_identifier) | 
+                (User.phone == request.recipient_identifier)
+            ).first()
+        else:
+            # Try as phone number
+            recipient = db.query(User).filter(User.phone == request.recipient_identifier).first()
+        
+        if not recipient:
+            raise HTTPException(
+                status_code=404,
+                detail="Recipient not found. Please check email, phone number, or user ID."
+            )
+        
+        # Prevent self-transfer
+        if sender.id == recipient.id:
+            raise HTTPException(status_code=400, detail="Cannot transfer to yourself")
+        
+        # Check if recipient account is active
+        if not recipient.is_active:
+            raise HTTPException(status_code=400, detail="Recipient account is inactive")
+        
+        # Get sender's NGN wallet
+        from shared.models.wallet import Wallet
+        sender_wallet = db.query(Wallet).filter(
+            Wallet.user_id == sender_id,
+            Wallet.currency == "NGN"
+        ).first()
+        
+        if not sender_wallet:
+            raise HTTPException(status_code=404, detail="Sender wallet not found")
+        
+        # Check if sender wallet is locked
+        if sender_wallet.is_locked:
+            raise HTTPException(
+                status_code=403,
+                detail="Your wallet is currently frozen. Please contact support."
+            )
+        
+        # Calculate fee (0.5% with minimum ₦10 and maximum ₦1000)
+        fee = max(10.0, min(request.amount * 0.005, 1000.0))
+        total_debit = request.amount + fee
+        
+        # Check sufficient balance
+        if float(sender_wallet.balance) < total_debit:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Insufficient balance. You need ₦{total_debit:,.2f} (Amount: ₦{request.amount:,.2f} + Fee: ₦{fee:,.2f})"
+            )
+        
+        # Get or create recipient's NGN wallet
+        recipient_wallet = db.query(Wallet).filter(
+            Wallet.user_id == recipient.id,
+            Wallet.currency == "NGN"
+        ).first()
+        
+        if not recipient_wallet:
+            # Create wallet for recipient
+            recipient_wallet = Wallet(
+                user_id=recipient.id,
+                currency="NGN",
+                balance=0.00,
+                pending_balance=0.00
+            )
+            db.add(recipient_wallet)
+            db.flush()
+        
+        # Check if recipient wallet is locked
+        if recipient_wallet.is_locked:
+            raise HTTPException(
+                status_code=403,
+                detail="Recipient's wallet is frozen. Transfer cannot be completed."
+            )
+        
+        # Generate transaction reference
+        import secrets
+        reference = f"P2P{secrets.token_hex(8).upper()}"
+        
+        # Create transaction record
+        from shared.models.transaction import Transaction
+        transaction = Transaction(
+            user_id=sender_id,
+            recipient_id=recipient.id,
+            transaction_type="P2P_TRANSFER",
+            status="COMPLETED",
+            amount=request.amount,
+            currency="NGN",
+            fee=fee,
+            net_amount=request.amount - fee,
+            description=request.description or "P2P Transfer",
+            reference=reference
+        )
+        db.add(transaction)
+        db.flush()
+        
+        # Update wallet balances (ATOMIC OPERATION)
+        sender_wallet.balance = float(sender_wallet.balance) - total_debit
+        recipient_wallet.balance = float(recipient_wallet.balance) + request.amount
+        
+        # Create ledger entries for double-entry bookkeeping
+        from shared.models.wallet import LedgerEntry
+        
+        # Sender debit entry
+        sender_ledger = LedgerEntry(
+            wallet_id=sender_wallet.id,
+            transaction_id=str(transaction.id),
+            account_type="ASSET",
+            entry_type="DEBIT",
+            amount=total_debit,
+            currency="NGN",
+            description=f"P2P Transfer to {recipient.first_name} {recipient.last_name}",
+            reference=reference
+        )
+        db.add(sender_ledger)
+        
+        # Recipient credit entry
+        recipient_ledger = LedgerEntry(
+            wallet_id=recipient_wallet.id,
+            transaction_id=str(transaction.id),
+            account_type="ASSET",
+            entry_type="CREDIT",
+            amount=request.amount,
+            currency="NGN",
+            description=f"P2P Transfer from {sender.first_name} {sender.last_name}",
+            reference=reference
+        )
+        db.add(recipient_ledger)
+        
+        # Fee entry (platform revenue)
+        if fee > 0:
+            fee_ledger = LedgerEntry(
+                wallet_id=sender_wallet.id,
+                transaction_id=str(transaction.id),
+                account_type="REVENUE",
+                entry_type="CREDIT",
+                amount=fee,
+                currency="NGN",
+                description="Transaction fee",
+                reference=reference
+            )
+            db.add(fee_ledger)
+        
+        # Commit all changes
+        db.commit()
+        db.refresh(transaction)
+        
+        logger.info(
+            f"P2P Transfer completed: {sender.email} -> {recipient.email}, "
+            f"Amount: ₦{request.amount:,.2f}, Fee: ₦{fee:,.2f}, Ref: {reference}"
+        )
+        
+        return {
+            "success": True,
+            "message": "Transfer completed successfully",
+            "transaction": {
+                "id": str(transaction.id),
+                "reference": reference,
+                "amount": float(request.amount),
+                "fee": float(fee),
+                "total_debit": float(total_debit),
+                "recipient_name": f"{recipient.first_name} {recipient.last_name}",
+                "recipient_email": recipient.email,
+                "new_balance": float(sender_wallet.balance),
+                "status": "COMPLETED",
+                "timestamp": transaction.created_at.isoformat() if transaction.created_at else None
+            }
+        }
+        
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"P2P transfer error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Transfer failed: {str(e)}"
+        )
+
+
+@app.get("/api/v1/payments/search-user/{identifier}")
+async def search_user_for_transfer(
+    identifier: str,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Search for a user by email, phone, or ID for P2P transfer."""
+    try:
+        current_user_id = get_current_user_id(credentials)
+        
+        # Find user
+        user = None
+        if '@' in identifier:
+            user = db.query(User).filter(User.email == identifier).first()
+        elif identifier.isdigit():
+            user = db.query(User).filter(
+                (User.id == identifier) | (User.phone == identifier)
+            ).first()
+        else:
+            user = db.query(User).filter(User.phone == identifier).first()
+        
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Don't allow searching for yourself
+        if user.id == current_user_id:
+            raise HTTPException(status_code=400, detail="Cannot transfer to yourself")
+        
+        return {
+            "found": True,
+            "user": {
+                "id": str(user.id),
+                "name": f"{user.first_name} {user.last_name}",
+                "email": user.email,
+                "phone": user.phone or "Not provided",
+                "is_active": user.is_active
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Search user error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to search user")
+
+
+# ========== WALLET DEPOSIT ENDPOINT ==========
+
+class DepositRequest(BaseModel):
+    amount: float
+    payment_method: str  # 'card', 'transfer', 'ussd'
+
+
+@app.post("/api/v1/wallet/deposit/initialize")
+async def initialize_deposit(
+    request: DepositRequest,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Initialize wallet deposit (Paystack integration or manual)."""
+    try:
+        user_id = get_current_user_id(credentials)
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Validate amount
+        if request.amount < 100:
+            raise HTTPException(status_code=400, detail="Minimum deposit is ₦100")
+        
+        if request.amount > 10000000:
+            raise HTTPException(status_code=400, detail="Maximum deposit is ₦10,000,000")
+        
+        # Get or create user's NGN wallet
+        from shared.models.wallet import Wallet
+        wallet = db.query(Wallet).filter(
+            Wallet.user_id == user_id,
+            Wallet.currency == "NGN"
+        ).first()
+        
+        if not wallet:
+            wallet = Wallet(
+                user_id=user_id,
+                currency="NGN",
+                balance=0.00,
+                pending_balance=0.00
+            )
+            db.add(wallet)
+            db.flush()
+        
+        # Generate reference
+        reference = f"DEP{secrets.token_hex(8).upper()}"
+        
+        if request.payment_method == 'card':
+            # REAL PAYSTACK INTEGRATION
+            paystack_secret_key = settings.paystack_secret_key
+            
+            if not paystack_secret_key:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Paystack is not configured. Please add PAYSTACK_SECRET_KEY to .env file"
+                )
+            
+            # Create pending transaction first
+            from shared.models.transaction import Transaction
+            transaction = Transaction(
+                user_id=user_id,
+                transaction_type="DEPOSIT",
+                status="PENDING",
+                amount=request.amount,
+                currency="NGN",
+                fee=0.00,
+                description=f"Wallet deposit via {request.payment_method}",
+                reference=reference
+            )
+            db.add(transaction)
+            db.commit()
+            
+            # Initialize Paystack transaction
+            paystack_url = f"{settings.paystack_base_url}/transaction/initialize"
+            paystack_payload = {
+                "email": user.email,
+                "amount": int(request.amount * 100),  # Paystack uses kobo (₦1 = 100 kobo)
+                "reference": reference,
+                "callback_url": "http://localhost:3000/wallet?deposit=success",  # Frontend callback
+                "metadata": {
+                    "user_id": user_id,
+                    "transaction_id": str(transaction.id),
+                    "wallet_id": str(wallet.id)
+                }
+            }
+            
+            try:
+                async with httpx.AsyncClient() as client:
+                    paystack_response = await client.post(
+                        paystack_url,
+                        json=paystack_payload,
+                        headers={
+                            "Authorization": f"Bearer {paystack_secret_key}",
+                            "Content-Type": "application/json"
+                        },
+                        timeout=30.0
+                    )
+                
+                if paystack_response.status_code != 200:
+                    logger.error(f"Paystack API error: {paystack_response.text}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Failed to initialize payment with Paystack"
+                    )
+                
+                paystack_data = paystack_response.json()
+                
+                if not paystack_data.get("status"):
+                    raise HTTPException(
+                        status_code=500,
+                        detail=paystack_data.get("message", "Paystack initialization failed")
+                    )
+                
+                authorization_url = paystack_data["data"]["authorization_url"]
+                access_code = paystack_data["data"]["access_code"]
+                
+                logger.info(f"Paystack payment initialized: {user.email}, Amount: ₦{request.amount:,.2f}, Ref: {reference}")
+                
+                return {
+                    "success": True,
+                    "message": "Payment initialized. Redirecting to Paystack...",
+                    "reference": reference,
+                    "amount": request.amount,
+                    "authorization_url": authorization_url,
+                    "access_code": access_code
+                }
+                
+            except httpx.RequestError as e:
+                logger.error(f"Paystack request error: {str(e)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to connect to Paystack. Please try again."
+                )
+        
+        elif request.payment_method == 'transfer':
+            # Bank Transfer - Requires Paystack Dedicated Virtual Accounts
+            # For now, show instructions to use Card payment instead
+            raise HTTPException(
+                status_code=501,
+                detail="Bank transfer is not yet available. Please use Card payment (via Paystack) instead. "
+                       "To enable bank transfers, set up Paystack Dedicated Virtual Accounts - see PAYSTACK_SETUP.md"
+            )
+        
+        else:  # ussd
+            # USSD - Requires bank integration
+            raise HTTPException(
+                status_code=501,
+                detail="USSD payment is not yet available. Please use Card payment (via Paystack) instead."
+            )
+        
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Deposit initialization error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to initialize deposit: {str(e)}")
+
+
+# Paystack Webhook - Verify and credit wallet
+@app.post("/api/v1/wallet/deposit/webhook")
+async def paystack_webhook(request: Request, db: Session = Depends(get_db)):
+    """
+    Paystack webhook to verify and complete deposits.
+    This endpoint is called by Paystack when a payment is completed.
+    """
+    try:
+        # Get the webhook payload
+        payload = await request.json()
+        event = payload.get("event")
+        data = payload.get("data", {})
+        
+        logger.info(f"Paystack webhook received: {event}")
+        
+        # Only process successful charge events
+        if event != "charge.success":
+            logger.info(f"Ignoring non-success event: {event}")
+            return {"status": "ignored"}
+        
+        # Extract transaction details
+        reference = data.get("reference")
+        amount = data.get("amount", 0) / 100  # Convert from kobo to naira
+        status = data.get("status")
+        metadata = data.get("metadata", {})
+        
+        if status != "success":
+            logger.warning(f"Payment not successful: {reference}, status: {status}")
+            return {"status": "failed"}
+        
+        # Find the transaction
+        from shared.models.transaction import Transaction
+        transaction = db.query(Transaction).filter(
+            Transaction.reference == reference
+        ).first()
+        
+        if not transaction:
+            logger.error(f"Transaction not found: {reference}")
+            return {"status": "transaction_not_found"}
+        
+        # Check if already processed
+        if transaction.status == "COMPLETED":
+            logger.info(f"Transaction already completed: {reference}")
+            return {"status": "already_processed"}
+        
+        # Get wallet
+        from shared.models.wallet import Wallet
+        wallet_id = metadata.get("wallet_id") or transaction.user_id
+        wallet = db.query(Wallet).filter(
+            Wallet.id == wallet_id
+        ).first()
+        
+        if not wallet:
+            # Fallback: get user's NGN wallet
+            wallet = db.query(Wallet).filter(
+                Wallet.user_id == transaction.user_id,
+                Wallet.currency == "NGN"
+            ).first()
+        
+        if not wallet:
+            logger.error(f"Wallet not found for transaction: {reference}")
+            return {"status": "wallet_not_found"}
+        
+        # Credit the wallet
+        wallet.balance = float(wallet.balance) + amount
+        
+        # Update transaction status
+        transaction.status = "COMPLETED"
+        transaction.amount = amount
+        
+        # Create ledger entry
+        from shared.models.wallet import LedgerEntry
+        ledger = LedgerEntry(
+            wallet_id=wallet.id,
+            transaction_id=str(transaction.id),
+            account_type="ASSET",
+            entry_type="CREDIT",
+            amount=amount,
+            currency="NGN",
+            description=f"Wallet deposit via Paystack (Ref: {reference})",
+            reference=reference
+        )
+        db.add(ledger)
+        
+        db.commit()
+        
+        logger.info(f"✅ Deposit completed: User {transaction.user_id}, Amount: ₦{amount:,.2f}, Ref: {reference}")
+        
+        return {"status": "success", "message": "Payment verified and wallet credited"}
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Webhook processing error: {str(e)}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+# Wallet routes - Direct endpoints (before proxy)
+@app.get("/api/v1/wallet/balance")
+async def get_wallet_balance_direct(
+    currency: str = "NGN",
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Get user's wallet balance directly without forwarding."""
+    try:
+        user_id = get_current_user_id(credentials)
+        from shared.models.wallet import Wallet
+        
+        wallet = db.query(Wallet).filter(
+            Wallet.user_id == user_id,
+            Wallet.currency == currency
+        ).first()
+        
+        if not wallet:
+            return {
+                "currency": currency,
+                "available_balance": "0.00",
+                "pending_balance": "0.00",
+                "total_balance": "0.00"
+            }
+        
+        # Calculate balances
+        available = float(wallet.balance) if wallet.balance else 0.0
+        pending = float(wallet.pending_balance) if wallet.pending_balance else 0.0
+        total = available + pending
+        
+        return {
+            "currency": wallet.currency,
+            "available_balance": f"{available:.2f}",
+            "pending_balance": f"{pending:.2f}",
+            "total_balance": f"{total:.2f}"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get wallet balance error: {str(e)}", exc_info=True)
+        return {"balance": "0.00", "currency": currency}
+
+
+@app.get("/api/v1/wallet/transactions")
+async def get_wallet_transactions_direct(
+    page: int = 1,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Get user's wallet transactions directly without forwarding."""
+    try:
+        user_id = get_current_user_id(credentials)
+        from shared.models.transaction import Transaction
+        
+        offset = (page - 1) * limit
+        transactions = db.query(Transaction).filter(
+            (Transaction.user_id == user_id) | (Transaction.recipient_id == user_id)
+        ).order_by(Transaction.created_at.desc()).offset(offset).limit(limit).all()
+        
+        total = db.query(Transaction).filter(
+            (Transaction.user_id == user_id) | (Transaction.recipient_id == user_id)
+        ).count()
+        
+        return {
+            "transactions": [
+                {
+                    "id": str(txn.id),
+                    "type": txn.type,
+                    "amount": str(txn.amount),
+                    "currency": txn.currency,
+                    "status": txn.status,
+                    "reference": txn.reference,
+                    "created_at": txn.created_at.isoformat() if txn.created_at else None
+                }
+                for txn in transactions
+            ],
+            "total": total,
+            "page": page,
+            "limit": limit
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get transactions error: {str(e)}", exc_info=True)
+        return {"transactions": [], "total": 0, "page": page, "limit": limit}
+
+
 @app.api_route("/api/v1/wallet/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def wallet_proxy(path: str, request: Request):
     """Proxy requests to wallet service."""
@@ -1375,11 +2656,11 @@ async def payments_proxy(path: str, request: Request):
     return await forward_request("payments", f"/api/v1/payments/{path}", request.method, request)
 
 
-# Cards routes
-@app.api_route("/api/v1/cards/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
-async def cards_proxy(path: str, request: Request):
-    """Proxy requests to cards service."""
-    return await forward_request("cards", f"/api/v1/cards/{path}", request.method, request)
+# Cards routes - DISABLED: Using direct endpoints instead
+# @app.api_route("/api/v1/cards/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+# async def cards_proxy(path: str, request: Request):
+#     """Proxy requests to cards service."""
+#     return await forward_request("cards", f"/api/v1/cards/{path}", request.method, request)
 
 
 # Loans routes
@@ -1390,6 +2671,834 @@ async def loans_proxy(path: str, request: Request):
 
 
 # Crypto routes
+# Crypto Deposit Endpoints (Coinbase Commerce)
+@app.post("/api/v1/crypto/deposit/initialize")
+async def initialize_crypto_deposit(
+    request: Request,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """
+    Initialize crypto deposit using NOWPayments.
+    Creates an invoice and returns deposit address.
+    """
+    try:
+        user_id = get_current_user_id(credentials)
+        user = db.query(User).filter(User.id == user_id).first()
+        
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        body = await request.json()
+        currency = body.get('currency', 'USDT')  # BTC, ETH, or USDT
+        amount_ngn = body.get('amount', 10000)  # Amount in NGN
+        
+        # Validate
+        if currency not in ['BTC', 'ETH', 'USDT']:
+            raise HTTPException(status_code=400, detail="Invalid currency")
+        
+        if amount_ngn < 30000:
+            raise HTTPException(status_code=400, detail="Minimum deposit is ₦30,000 (NOWPayments requirement)")
+        
+        # Check if NOWPayments is configured
+        api_key = settings.nowpayments_api_key
+        
+        if not api_key:
+            raise HTTPException(
+                status_code=500,
+                detail="NOWPayments is not configured. Please add NOWPAYMENTS_API_KEY to .env file."
+            )
+        
+        # Convert NGN to USD (approximate)
+        usd_rate = 1500  # ₦1 = $0.00067, or $1 = ₦1500
+        amount_usd = amount_ngn / usd_rate
+        
+        # Map currency codes for NOWPayments
+        nowpayments_currency = currency.lower()
+        if currency == 'USDT':
+            nowpayments_currency = 'usdttrc20'  # USDT on Tron network (lowest fees)
+        
+        # Create NOWPayments invoice
+        invoice_data = {
+            "price_amount": round(amount_usd, 2),
+            "price_currency": "usd",
+            "pay_currency": nowpayments_currency,
+            "order_id": f"BENGO-{user_id}-{int(datetime.utcnow().timestamp())}",
+            "order_description": f"BenGo Wallet Deposit - {currency}",
+            "ipn_callback_url": "http://localhost:8000/api/v1/crypto/deposit/webhook",
+            "success_url": "http://localhost:3000/dashboard?deposit=success",
+            "cancel_url": "http://localhost:3000/dashboard?deposit=cancelled"
+        }
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{settings.nowpayments_api_url}/invoice",
+                    json=invoice_data,
+                    headers={
+                        "x-api-key": api_key,
+                        "Content-Type": "application/json"
+                    },
+                    timeout=30.0
+                )
+            
+            if response.status_code != 200:
+                logger.error(f"NOWPayments error: {response.text}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to create invoice: {response.text}"
+                )
+            
+            invoice = response.json()
+            
+            # Log the full response to debug
+            logger.info(f"NOWPayments Response: {invoice}")
+            
+            # Get payment address
+            pay_address = invoice.get('pay_address')
+            invoice_id = invoice.get('id')
+            invoice_url = invoice.get('invoice_url')
+            pay_amount = invoice.get('pay_amount')
+            
+            logger.info(f"Payment address for {currency}: {pay_address}")
+            
+            # Generate QR code for the address
+            import qrcode
+            import io
+            import base64
+            
+            qr = qrcode.QRCode(version=1, box_size=10, border=2)
+            qr.add_data(pay_address)
+            qr.make(fit=True)
+            qr_img = qr.make_image(fill_color="black", back_color="white")
+            
+            buffer = io.BytesIO()
+            qr_img.save(buffer, format='PNG')
+            qr_base64 = base64.b64encode(buffer.getvalue()).decode()
+            
+            # Save invoice info to database for tracking
+            from shared.models.crypto import CryptoTransaction
+            transaction = CryptoTransaction(
+                user_id=user_id,
+                transaction_type="FUND",
+                currency=currency,
+                amount=0,  # Will be updated when payment is received
+                ngn_amount=amount_ngn,
+                status="PENDING",
+                wallet_address=pay_address,
+                blockchain_tx_hash=str(invoice_id)  # Use invoice ID for tracking
+            )
+            db.add(transaction)
+            db.commit()
+            
+            logger.info(f"Crypto deposit initialized: User {user_id}, Currency: {currency}, Invoice: {invoice_id}")
+            
+            return {
+                'success': True,
+                'invoice_id': invoice_id,
+                'payment_id': invoice.get('payment_id'),
+                'hosted_url': invoice_url,  # NOWPayments payment page
+                'address': pay_address,
+                'qr_code': f"data:image/png;base64,{qr_base64}",
+                'expires_at': invoice.get('created_at'),  # NOWPayments invoices don't expire quickly
+                'amount_crypto': {'amount': str(pay_amount), 'currency': currency},
+                'currency': currency
+            }
+            
+        except httpx.RequestError as e:
+            logger.error(f"NOWPayments request error: {str(e)}")
+            raise HTTPException(
+                status_code=503,
+                detail="Crypto deposit service is temporarily unavailable. Please check your internet connection or try again later."
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error initializing crypto deposit: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to initialize deposit: {str(e)}")
+
+
+# NOWPayments Webhook (IPN)
+@app.post("/api/v1/crypto/deposit/webhook")
+async def nowpayments_webhook(request: Request, db: Session = Depends(get_db)):
+    """
+    Webhook to receive payment notifications from NOWPayments.
+    This is called when a user sends crypto.
+    """
+    try:
+        # Verify webhook signature (IPN Secret)
+        import hmac
+        import hashlib
+        import json
+        
+        signature = request.headers.get('x-nowpayments-sig')
+        payload_bytes = await request.body()
+        payload_str = payload_bytes.decode('utf-8')
+        
+        ipn_secret = settings.nowpayments_ipn_secret
+        
+        if ipn_secret and signature:
+            # Sort keys and create signature
+            computed_signature = hmac.new(
+                ipn_secret.encode(),
+                payload_bytes,
+                hashlib.sha512
+            ).hexdigest()
+            
+            if not hmac.compare_digest(signature, computed_signature):
+                logger.warning("Invalid webhook signature")
+                raise HTTPException(status_code=401, detail="Invalid signature")
+        
+        # Parse event
+        event = json.loads(payload_str)
+        
+        payment_status = event.get('payment_status')
+        payment_id = event.get('payment_id')
+        invoice_id = event.get('invoice_id')
+        order_id = event.get('order_id')
+        
+        logger.info(f"NOWPayments webhook received: Status={payment_status}, Invoice={invoice_id}")
+        
+        # Only process finished/confirmed payments
+        if payment_status in ['finished', 'confirmed']:
+            pay_amount = float(event.get('pay_amount', 0))
+            pay_currency = event.get('pay_currency', 'USDT').upper()
+            price_amount = float(event.get('price_amount', 0))
+            price_currency = event.get('price_currency', 'USD').upper()
+            
+            # Extract user_id from order_id (format: BENGO-{user_id}-{timestamp})
+            try:
+                user_id = order_id.split('-')[1]
+            except:
+                logger.error(f"Invalid order_id format: {order_id}")
+                return {"status": "error", "message": "Invalid order_id"}
+            
+            # Map currency back to standard format
+            currency = pay_currency
+            if 'USDT' in pay_currency.upper():
+                currency = 'USDT'
+            
+            # Calculate NGN amount (USD * rate)
+            usd_rate = 1500
+            amount_ngn = price_amount * usd_rate
+            
+            # Update transaction
+            from shared.models.crypto import CryptoTransaction
+            transaction = db.query(CryptoTransaction).filter(
+                CryptoTransaction.user_id == user_id,
+                CryptoTransaction.blockchain_tx_hash == str(invoice_id)
+            ).first()
+            
+            if transaction:
+                transaction.amount = pay_amount
+                transaction.status = "CONFIRMED"
+            else:
+                # Create new transaction if not found
+                transaction = CryptoTransaction(
+                    user_id=user_id,
+                    transaction_type="FUND",
+                    currency=currency,
+                    amount=pay_amount,
+                    ngn_amount=amount_ngn,
+                    status="CONFIRMED",
+                    blockchain_tx_hash=str(payment_id)
+                )
+                db.add(transaction)
+            
+            # Credit user's NGN wallet
+            from shared.models.wallet import Wallet
+            wallet = db.query(Wallet).filter(
+                Wallet.user_id == user_id,
+                Wallet.currency == "NGN"
+            ).first()
+            
+            if wallet:
+                wallet.balance = float(wallet.balance) + amount_ngn
+                
+                # Create ledger entry
+                from shared.models.wallet import LedgerEntry
+                ledger = LedgerEntry(
+                    wallet_id=wallet.id,
+                    transaction_id=str(transaction.id) if transaction else None,
+                    account_type="ASSET",
+                    entry_type="CREDIT",
+                    amount=amount_ngn,
+                    currency="NGN",
+                    description=f"Crypto deposit: {pay_amount} {currency}",
+                    reference=str(payment_id)
+                )
+                db.add(ledger)
+            
+            db.commit()
+            
+            logger.info(f"✅ Crypto deposit confirmed: User {user_id}, {pay_amount} {currency} = ₦{amount_ngn:,.2f}")
+            
+            return {"status": "success", "message": "Payment processed"}
+        
+        return {"status": "ignored", "payment_status": payment_status}
+        
+    except Exception as e:
+        logger.error(f"Webhook processing error: {str(e)}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+# ============================================================================
+# BILL PAYMENT ENDPOINTS
+# ============================================================================
+
+class BillPurchaseRequest(BaseModel):
+    """Bill purchase request model."""
+    bill_type: str  # airtime, data, tv
+    provider_code: str  # mtn, airtel, dstv, etc
+    amount: float
+    phone_number: Optional[str] = None  # For airtime/data
+    account_number: Optional[str] = None  # For TV
+    data_plan_code: Optional[str] = None  # For data bundles
+
+
+@app.get("/api/v1/bills/providers")
+async def get_bill_providers(
+    category: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Get available bill providers."""
+    try:
+        from shared.models.bill import BillProvider
+        
+        query = db.query(BillProvider).filter(BillProvider.is_active == True)
+        
+        if category:
+            query = query.filter(BillProvider.category == category)
+        
+        providers = query.all()
+        
+        return {
+            "providers": [
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "category": p.category,
+                    "api_code": p.api_code
+                }
+                for p in providers
+            ]
+        }
+    
+    except Exception as e:
+        logger.error(f"Get providers error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch providers")
+
+
+@app.post("/api/v1/bills/purchase")
+async def purchase_bill(
+    purchase_request: BillPurchaseRequest,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Purchase a bill."""
+    try:
+        user_id = get_current_user_id(credentials)
+        
+        from shared.models.bill import Bill, BillTransaction
+        from shared.models.wallet import Wallet, LedgerEntry
+        from shared.utils.vtu_provider import get_vtu_provider
+        import secrets
+        
+        # Validate amount
+        if purchase_request.amount <= 0:
+            raise HTTPException(status_code=400, detail="Invalid amount")
+        
+        # Check wallet balance
+        wallet = db.query(Wallet).filter(
+            Wallet.user_id == user_id,
+            Wallet.currency == "NGN"
+        ).first()
+        
+        if not wallet or wallet.balance < purchase_request.amount:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Insufficient balance. You need ₦{purchase_request.amount:,.2f}"
+            )
+        
+        # Create bill record
+        reference = f"BILL{secrets.token_hex(8).upper()}"
+        bill = Bill(
+            user_id=user_id,
+            bill_type=purchase_request.bill_type,
+            provider_code=purchase_request.provider_code,
+            provider_name=purchase_request.provider_code.upper(),
+            reference=reference,
+            amount=purchase_request.amount,
+            phone_number=purchase_request.phone_number,
+            account_number=purchase_request.account_number,
+            status="pending"
+        )
+        db.add(bill)
+        db.flush()  # Get bill ID
+        
+        # Debit wallet (pending state)
+        wallet.balance -= purchase_request.amount
+        
+        # Create ledger entry (debit)
+        ledger = LedgerEntry(
+            user_id=user_id,
+            wallet_id=wallet.id,
+            transaction_type="debit",
+            amount=purchase_request.amount,
+            currency="NGN",
+            description=f"Bill payment: {purchase_request.bill_type} - {purchase_request.provider_code}",
+            reference=reference
+        )
+        db.add(ledger)
+        
+        # Create bill transaction record
+        bill_txn = BillTransaction(
+            bill_id=bill.id,
+            wallet_transaction_id=ledger.id if hasattr(ledger, 'id') else None,
+            status="pending"
+        )
+        db.add(bill_txn)
+        db.commit()
+        
+        # Call VTU provider
+        vtu_provider = get_vtu_provider()
+        
+        if purchase_request.bill_type == "airtime":
+            result = await vtu_provider.purchase_airtime(
+                network=purchase_request.provider_code,
+                phone_number=purchase_request.phone_number,
+                amount=purchase_request.amount
+            )
+        elif purchase_request.bill_type == "data":
+            result = await vtu_provider.purchase_data(
+                network=purchase_request.provider_code,
+                phone_number=purchase_request.phone_number,
+                data_plan_code=purchase_request.data_plan_code or "DEFAULT",
+                amount=purchase_request.amount
+            )
+        elif purchase_request.bill_type == "tv":
+            result = await vtu_provider.pay_tv_subscription(
+                provider=purchase_request.provider_code,
+                smartcard_number=purchase_request.account_number,
+                package_code="DEFAULT",
+                amount=purchase_request.amount
+            )
+        else:
+            result = {"status": "failed", "message": "Unsupported bill type"}
+        
+        # Update bill and transaction status
+        if result["status"] == "success":
+            bill.status = "success"
+            bill.provider_reference = result.get("provider_reference")
+            bill_txn.status = "success"
+            bill_txn.provider_response = result
+        else:
+            # Revert wallet debit on failure
+            bill.status = "failed"
+            bill_txn.status = "failed"
+            bill_txn.provider_response = result
+            wallet.balance += purchase_request.amount  # Refund
+        
+        db.commit()
+        
+        return {
+            "status": bill.status,
+            "reference": bill.reference,
+            "message": result.get("message", "Bill payment processed"),
+            "amount": float(bill.amount),
+            "provider": bill.provider_name
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Bill purchase error: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Bill purchase failed: {str(e)}")
+
+
+@app.get("/api/v1/bills/history")
+async def get_bill_history(
+    page: int = 1,
+    limit: int = 20,
+    bill_type: Optional[str] = None,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Get user's bill payment history."""
+    try:
+        user_id = get_current_user_id(credentials)
+        
+        from shared.models.bill import Bill
+        
+        query = db.query(Bill).filter(Bill.user_id == user_id)
+        
+        if bill_type:
+            query = query.filter(Bill.bill_type == bill_type)
+        
+        offset = (page - 1) * limit
+        bills = query.order_by(Bill.created_at.desc()).offset(offset).limit(limit).all()
+        total = query.count()
+        
+        return {
+            "bills": [
+                {
+                    "id": bill.id,
+                    "bill_type": bill.bill_type,
+                    "provider": bill.provider_name,
+                    "amount": float(bill.amount),
+                    "status": bill.status,
+                    "reference": bill.reference,
+                    "phone_number": bill.phone_number,
+                    "account_number": bill.account_number,
+                    "created_at": bill.created_at.isoformat() if bill.created_at else None
+                }
+                for bill in bills
+            ],
+            "total": total,
+            "page": page,
+            "limit": limit
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get bill history error: {str(e)}", exc_info=True)
+        return {"bills": [], "total": 0, "page": page, "limit": limit}
+
+
+# Direct crypto endpoints (before proxy to avoid forwarding)
+@app.get("/api/v1/crypto/balances")
+async def get_crypto_balances_direct(
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Get user's crypto balances directly without forwarding."""
+    try:
+        user_id = get_current_user_id(credentials)
+        from shared.models.crypto import CryptoBalance
+        
+        balances = db.query(CryptoBalance).filter(CryptoBalance.user_id == user_id).all()
+        
+        # Get crypto wallet addresses
+        from shared.models.crypto import CryptoWallet
+        wallets = db.query(CryptoWallet).filter(CryptoWallet.user_id == user_id).all()
+        wallet_map = {w.currency: w.address for w in wallets}
+        
+        return {
+            "balances": [
+                {
+                    "currency": bal.currency,
+                    "balance": str(bal.balance),
+                    "ngn_value": str(bal.ngn_value),
+                    "wallet_address": wallet_map.get(bal.currency, "")
+                }
+                for bal in balances
+            ]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get crypto balances error: {str(e)}", exc_info=True)
+        # Return empty balances instead of error for better UX
+        return {"balances": []}
+
+
+# Direct card endpoints
+class CreateCardRequest(BaseModel):
+    cardholder_name: Optional[str] = None
+    currency: str = "NGN"
+
+class FundCardRequest(BaseModel):
+    amount: float
+
+@app.post("/api/v1/cards/create")
+async def create_card_direct(
+    request: CreateCardRequest,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Create a new virtual card."""
+    try:
+        user_id = get_current_user_id(credentials)
+        from shared.models.card import Card, CardStatus, CardType
+        from shared.models.user import User
+        import random
+        import hashlib
+        
+        # Get user info
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Generate card details
+        from shared.utils.encryption import encrypt_value
+        
+        card_number = f"5399{''.join([str(random.randint(0, 9)) for _ in range(12)])}"
+        cvv = ''.join([str(random.randint(0, 9)) for _ in range(3)])
+        cvv_encrypted = encrypt_value(cvv)
+        
+        cardholder_name = request.cardholder_name or f"{user.first_name} {user.last_name}".upper()
+        
+        # Create card
+        card = Card(
+            user_id=user_id,
+            card_number=card_number,
+            cardholder_name=cardholder_name,
+            expiry_month=12,
+            expiry_year=datetime.now().year + 3,
+            cvv_hash=cvv_encrypted,  # Now encrypted instead of hashed
+            card_type=CardType.VIRTUAL,
+            status=CardStatus.ACTIVE,
+            currency=request.currency,
+            balance=0.00
+        )
+        
+        db.add(card)
+        db.commit()
+        db.refresh(card)
+        
+        # Return card with CVV (only shown once)
+        return {
+            "card_id": card.id,
+            "card_number": card.card_number,
+            "cardholder_name": card.cardholder_name,
+            "expiry_month": card.expiry_month,
+            "expiry_year": card.expiry_year,
+            "cvv": cvv,  # Only returned on creation
+            "card_type": card.card_type,
+            "status": card.status,
+            "currency": card.currency,
+            "balance": str(card.balance),
+            "created_at": card.created_at.isoformat()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Create card error: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to create card")
+
+@app.get("/api/v1/cards")
+async def get_cards_direct(
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Get all user's cards."""
+    try:
+        user_id = get_current_user_id(credentials)
+        from shared.models.card import Card
+        
+        cards = db.query(Card).filter(Card.user_id == user_id).order_by(Card.created_at.desc()).all()
+        
+        return {
+            "cards": [
+                {
+                    "card_id": card.id,
+                    "card_number": card.card_number,
+                    "cardholder_name": card.cardholder_name,
+                    "expiry_month": card.expiry_month,
+                    "expiry_year": card.expiry_year,
+                    "card_type": card.card_type,
+                    "status": card.status,
+                    "currency": card.currency,
+                    "balance": str(card.balance),
+                    "created_at": card.created_at.isoformat()
+                }
+                for card in cards
+            ]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get cards error: {str(e)}", exc_info=True)
+        return {"cards": []}
+
+@app.post("/api/v1/cards/{card_id}/fund")
+async def fund_card_direct(
+    card_id: str,
+    request: FundCardRequest,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Fund a card from wallet."""
+    try:
+        user_id = get_current_user_id(credentials)
+        from shared.models.card import Card
+        from shared.models.wallet import Wallet
+        from shared.models.transaction import Transaction, TransactionType, TransactionStatus
+        
+        # Get card
+        card = db.query(Card).filter(Card.id == card_id, Card.user_id == user_id).first()
+        if not card:
+            raise HTTPException(status_code=404, detail="Card not found")
+        
+        if card.status != "ACTIVE":
+            raise HTTPException(status_code=400, detail="Card is not active")
+        
+        # Get user wallet
+        wallet = db.query(Wallet).filter(
+            Wallet.user_id == user_id,
+            Wallet.currency == card.currency
+        ).first()
+        
+        if not wallet:
+            raise HTTPException(status_code=404, detail="Wallet not found")
+        
+        if float(wallet.balance) < request.amount:
+            raise HTTPException(status_code=400, detail="Insufficient wallet balance")
+        
+        # Deduct from wallet
+        wallet.balance = float(wallet.balance) - request.amount
+        
+        # Add to card
+        card.balance = float(card.balance) + request.amount
+        
+        # Create transaction
+        transaction = Transaction(
+            user_id=user_id,
+            transaction_type=TransactionType.CARD_PAYMENT,
+            status=TransactionStatus.COMPLETED,
+            amount=request.amount,
+            currency=card.currency,
+            fee=0.00,
+            net_amount=request.amount,
+            description=f"Card funding - {card.card_number[-4:]}",
+            reference=f"CARD-FUND-{card.id}-{datetime.now().timestamp()}"
+        )
+        
+        db.add(transaction)
+        db.commit()
+        
+        return {
+            "message": "Card funded successfully",
+            "card_balance": str(card.balance),
+            "wallet_balance": str(wallet.balance)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Fund card error: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to fund card")
+
+@app.post("/api/v1/cards/{card_id}/freeze")
+async def freeze_card_direct(
+    card_id: str,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Freeze a card."""
+    try:
+        user_id = get_current_user_id(credentials)
+        from shared.models.card import Card, CardStatus
+        
+        card = db.query(Card).filter(Card.id == card_id, Card.user_id == user_id).first()
+        if not card:
+            raise HTTPException(status_code=404, detail="Card not found")
+        
+        card.status = CardStatus.BLOCKED
+        db.commit()
+        
+        return {"message": "Card frozen successfully", "status": card.status}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Freeze card error: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to freeze card")
+
+@app.post("/api/v1/cards/{card_id}/unfreeze")
+async def unfreeze_card_direct(
+    card_id: str,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Unfreeze a card."""
+    try:
+        user_id = get_current_user_id(credentials)
+        from shared.models.card import Card, CardStatus
+        
+        card = db.query(Card).filter(Card.id == card_id, Card.user_id == user_id).first()
+        if not card:
+            raise HTTPException(status_code=404, detail="Card not found")
+        
+        card.status = CardStatus.ACTIVE
+        db.commit()
+        
+        return {"message": "Card unfrozen successfully", "status": card.status}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unfreeze card error: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to unfreeze card")
+
+@app.get("/api/v1/cards/{card_id}/cvv")
+async def get_card_cvv_direct(
+    card_id: str,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Get card CVV (decrypted)."""
+    try:
+        user_id = get_current_user_id(credentials)
+        from shared.models.card import Card
+        from shared.utils.encryption import decrypt_value
+        
+        card = db.query(Card).filter(Card.id == card_id, Card.user_id == user_id).first()
+        if not card:
+            raise HTTPException(status_code=404, detail="Card not found")
+        
+        # Decrypt CVV
+        cvv = decrypt_value(card.cvv_hash)
+        
+        return {"cvv": cvv}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get CVV error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to retrieve CVV")
+
+@app.delete("/api/v1/cards/{card_id}")
+async def delete_card_direct(
+    card_id: str,
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Delete a card."""
+    try:
+        user_id = get_current_user_id(credentials)
+        from shared.models.card import Card
+        from shared.models.wallet import Wallet
+        
+        card = db.query(Card).filter(Card.id == card_id, Card.user_id == user_id).first()
+        if not card:
+            raise HTTPException(status_code=404, detail="Card not found")
+        
+        # If card has balance, refund to wallet
+        if float(card.balance) > 0:
+            wallet = db.query(Wallet).filter(
+                Wallet.user_id == user_id,
+                Wallet.currency == card.currency
+            ).first()
+            
+            if wallet:
+                wallet.balance = float(wallet.balance) + float(card.balance)
+        
+        db.delete(card)
+        db.commit()
+        
+        return {"message": "Card deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete card error: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to delete card")
+
+
 @app.api_route("/api/v1/crypto/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def crypto_proxy(path: str, request: Request):
     """Proxy requests to crypto service."""

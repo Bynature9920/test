@@ -48,6 +48,22 @@ class Settings(BaseSettings):
     payment_gateway_api_url: str = ""
     bank_api_key: str = ""
     bank_api_url: str = ""
+    
+    # Paystack Configuration
+    paystack_secret_key: str = ""
+    paystack_public_key: str = ""
+    paystack_base_url: str = "https://api.paystack.co"
+    
+    # Coinbase Commerce Configuration (Legacy)
+    coinbase_commerce_api_key: str = ""
+    coinbase_commerce_webhook_secret: str = ""
+    coinbase_commerce_api_url: str = "https://api.commerce.coinbase.com"
+    
+    # NOWPayments Configuration
+    nowpayments_api_key: str = ""
+    nowpayments_api_url: str = "https://api.nowpayments.io/v1"
+    nowpayments_ipn_secret: str = ""
+    
     crypto_provider_api_key: str = ""
     crypto_provider_api_url: str = ""
     crypto_wallet_address: str = ""
@@ -59,6 +75,14 @@ class Settings(BaseSettings):
     # Security
     encryption_key: str
     allowed_origins: str = "http://localhost:3000,http://localhost:8080"
+    
+    # Email/SMTP Configuration
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    from_email: str = "noreply@bengo.com"
+    frontend_url: str = "http://localhost:3000"
     
     # Feature Flags
     enable_crypto: bool = True

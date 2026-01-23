@@ -33,27 +33,51 @@ class ApiClient {
       }
     )
 
-    // Response interceptor - handle errors
+    // Response interceptor - handle errors and token refresh
     this.client.interceptors.response.use(
       (response) => response,
       async (error) => {
-        // Check if it's a network error (backend not available)
-        const isNetworkError = error.code === 'ERR_NETWORK' || error.message?.includes('Network')
+        const originalRequest = error.config
         const isDemoToken = tokenStorage.getAccessToken()?.startsWith('demo-') || tokenStorage.getAccessToken() === 'demo-access-token'
         
         // Special handling for 401 Unauthorized
         if (error.response?.status === 401) {
-          // Only redirect to login if it's not a demo token and not an auth endpoint
-          const isAuthEndpoint = error.config?.url?.includes('/auth/')
-          if (!isDemoToken && !isAuthEndpoint) {
-            tokenStorage.clearTokens()
-            window.location.href = '/login'
-            toast.error('Session expired. Please login again.')
+          const isAuthEndpoint = originalRequest?.url?.includes('/auth/')
+          
+          // Don't retry if it's already a retry or a demo token or auth endpoint
+          if (!originalRequest._retry && !isDemoToken && !isAuthEndpoint) {
+            originalRequest._retry = true
+            
+            const refreshToken = tokenStorage.getRefreshToken()
+            
+            // Try to refresh the token
+            if (refreshToken) {
+              try {
+                const response = await axios.post(`${API_BASE_URL}/api/v1/auth/refresh`, {
+                  refresh_token: refreshToken
+                })
+                
+                const { access_token, refresh_token: new_refresh_token } = response.data
+                tokenStorage.setTokens(access_token, new_refresh_token)
+                
+                // Retry the original request with new token
+                originalRequest.headers.Authorization = `Bearer ${access_token}`
+                return this.client(originalRequest)
+              } catch (refreshError) {
+                // Refresh failed, logout user
+                tokenStorage.clearTokens()
+                window.location.href = '/login'
+                toast.error('Your session has expired. Please login again.')
+                return Promise.reject(refreshError)
+              }
+            } else {
+              // No refresh token, logout user
+              tokenStorage.clearTokens()
+              window.location.href = '/login'
+              toast.error('Your session has expired. Please login again.')
+            }
           }
-          // For auth endpoints, let the component handle the error (don't show toast here)
         } 
-        // Don't show automatic toasts for other errors - let components handle them
-        // This prevents double toasts and unwanted popups
         
         // Silently pass the error to the calling component
         return Promise.reject(error)

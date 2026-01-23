@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { paymentsService } from '@/services/api/paymentsService'
 import toast from 'react-hot-toast'
-import { Building2, GraduationCap, Users, Trophy } from 'lucide-react'
+import { Building2, GraduationCap } from 'lucide-react'
 
 // Nigerian banks list
 const NIGERIAN_BANKS = [
@@ -28,20 +28,8 @@ const NIGERIAN_BANKS = [
   { name: 'Zenith Bank', code: '057' },
 ]
 
-// Betting platforms
-const BETTING_PLATFORMS = [
-  { name: 'SportyBet', code: 'SPORTYBET' },
-  { name: 'iLOTBet', code: 'ILOTBET' },
-  { name: '1xBet', code: '1XBET' },
-  { name: 'Bet9ja', code: 'BET9JA' },
-  { name: 'Betway', code: 'BETWAY' },
-  { name: '22Bet', code: '22BET' },
-  { name: 'NairaBet', code: 'NAIRABET' },
-  { name: 'MerryBet', code: 'MERRYBET' },
-]
-
 export default function PaymentsPage() {
-  const [activeTab, setActiveTab] = useState<'p2p_user' | 'bank' | 'betting' | 'tuition'>('p2p_user')
+  const [activeTab, setActiveTab] = useState<'bank' | 'tuition'>('bank')
   const [loading, setLoading] = useState(false)
   
   // Bank transfer states
@@ -49,11 +37,6 @@ export default function PaymentsPage() {
   const [selectedBank, setSelectedBank] = useState('')
   const [accountName, setAccountName] = useState('')
   const [fetchingAccountName, setFetchingAccountName] = useState(false)
-  
-  // P2P User transfer states
-  const [recipientUserId, setRecipientUserId] = useState('')
-  const [p2pAmount, setP2pAmount] = useState('')
-  const [p2pDescription, setP2pDescription] = useState('')
 
   // Auto-fetch account name when account number and bank are provided
   useEffect(() => {
@@ -83,28 +66,6 @@ export default function PaymentsPage() {
       setAccountName('')
     } finally {
       setFetchingAccountName(false)
-    }
-  }
-
-  const handleP2PUserTransfer = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    if (!recipientUserId || !p2pAmount) {
-      toast.error('Please fill all fields')
-      return
-    }
-
-    setLoading(true)
-    try {
-      // Demo mode - simulate transfer
-      await new Promise(resolve => setTimeout(resolve, 1500))
-      toast.success(`Successfully sent ₦${parseFloat(p2pAmount).toLocaleString()} to user ${recipientUserId}`)
-      setRecipientUserId('')
-      setP2pAmount('')
-      setP2pDescription('')
-    } catch (error) {
-      toast.error('Transfer failed')
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -144,46 +105,16 @@ export default function PaymentsPage() {
     }
   }
 
-  const handleBettingFunding = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    setLoading(true)
-    const formData = new FormData(e.currentTarget)
-    const platform = formData.get('platform') as string
-    const accountId = formData.get('account_id') as string
-    const amount = formData.get('amount') as string
-
-    try {
-      // Demo mode - simulate funding
-      await new Promise(resolve => setTimeout(resolve, 1500))
-      toast.success(`Successfully funded ₦${parseFloat(amount).toLocaleString()} to ${platform}`)
-      e.currentTarget.reset()
-    } catch (error) {
-      toast.error('Funding failed')
-    } finally {
-      setLoading(false)
-    }
-  }
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-3xl font-bold text-gray-900 dark:text-slate-100">Payments</h2>
+        <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-slate-100">Payments</h2>
         <p className="text-gray-600 dark:text-slate-400 mt-1">Send money, fund accounts, and make payments</p>
       </div>
 
       <div className="card">
         <div className="flex gap-4 border-b border-gray-200 dark:border-slate-700 mb-6 overflow-x-auto">
-          <button
-            onClick={() => setActiveTab('p2p_user')}
-            className={`px-4 py-2 font-medium transition-colors whitespace-nowrap ${
-              activeTab === 'p2p_user'
-                ? 'text-primary-600 dark:text-primary-400 border-b-2 border-primary-600 dark:border-primary-400'
-                : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200'
-            }`}
-          >
-            <Users className="w-4 h-4 inline mr-2" />
-            Send to User
-          </button>
           <button
             onClick={() => setActiveTab('bank')}
             className={`px-4 py-2 font-medium transition-colors whitespace-nowrap ${
@@ -194,17 +125,6 @@ export default function PaymentsPage() {
           >
             <Building2 className="w-4 h-4 inline mr-2" />
             Bank Transfer
-          </button>
-          <button
-            onClick={() => setActiveTab('betting')}
-            className={`px-4 py-2 font-medium transition-colors whitespace-nowrap ${
-              activeTab === 'betting'
-                ? 'text-primary-600 dark:text-primary-400 border-b-2 border-primary-600 dark:border-primary-400'
-                : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200'
-            }`}
-          >
-            <Trophy className="w-4 h-4 inline mr-2" />
-            Betting Accounts
           </button>
           <button
             onClick={() => setActiveTab('tuition')}
@@ -218,67 +138,6 @@ export default function PaymentsPage() {
             Tuition
           </button>
         </div>
-
-        {activeTab === 'p2p_user' && (
-          <div className="space-y-6">
-            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
-              <p className="text-sm text-green-900 dark:text-green-200">
-                <strong>Send to User:</strong> Send money to other app users using their unique User ID. 
-                Transfers are instant and free.
-              </p>
-            </div>
-
-            <form onSubmit={handleP2PUserTransfer} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
-                  Recipient User ID
-                </label>
-                <input
-                  type="text"
-                  value={recipientUserId}
-                  onChange={(e) => setRecipientUserId(e.target.value.toUpperCase())}
-                  className="input-field font-mono"
-                  placeholder="FIN12345678"
-                  required
-                  pattern="FIN[0-9A-Z]{8}"
-                />
-                <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
-                  Enter the recipient's unique User ID (12-digit number)
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
-                  Amount (₦)
-                </label>
-                <input
-                  type="number"
-                  value={p2pAmount}
-                  onChange={(e) => setP2pAmount(e.target.value)}
-                  className="input-field"
-                  placeholder="0.00"
-                  step="0.01"
-                  min="1"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
-                  Description (Optional)
-                </label>
-                <input
-                  type="text"
-                  value={p2pDescription}
-                  onChange={(e) => setP2pDescription(e.target.value)}
-                  className="input-field"
-                  placeholder="Payment for services"
-                />
-              </div>
-              <button type="submit" disabled={loading || !recipientUserId || !p2pAmount} className="btn-primary w-full">
-                {loading ? 'Sending...' : 'Send Money'}
-              </button>
-            </form>
-          </div>
-        )}
 
         {activeTab === 'bank' && (
           <form onSubmit={handleBankTransfer} className="space-y-4">
@@ -372,68 +231,6 @@ export default function PaymentsPage() {
               </>
             )}
           </form>
-        )}
-
-        {activeTab === 'betting' && (
-          <div className="space-y-6">
-            <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg p-4">
-              <p className="text-sm text-purple-900 dark:text-purple-200">
-                <strong>Betting Account Funding:</strong> Fund your betting accounts instantly. 
-                Funds are credited immediately to your betting wallet.
-              </p>
-            </div>
-
-            <form onSubmit={handleBettingFunding} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
-                  Select Betting Platform
-                </label>
-                <select name="platform" className="input-field" required>
-                  <option value="">Choose betting platform</option>
-                  {BETTING_PLATFORMS.map((platform) => (
-                    <option key={platform.code} value={platform.name}>
-                      {platform.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
-                  Your Betting Account ID/Username
-                </label>
-                <input
-                  type="text"
-                  name="account_id"
-                  className="input-field"
-                  placeholder="Enter your betting account ID or username"
-                  required
-                />
-                <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
-                  This is the ID or username you use to login to your betting account
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
-                  Amount (₦)
-                </label>
-                <input
-                  type="number"
-                  name="amount"
-                  className="input-field"
-                  placeholder="0.00"
-                  step="0.01"
-                  min="100"
-                  required
-                />
-                <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
-                  Minimum funding amount: ₦100
-                </p>
-              </div>
-              <button type="submit" disabled={loading} className="btn-primary w-full">
-                {loading ? 'Funding Account...' : 'Fund Betting Account'}
-              </button>
-            </form>
-          </div>
         )}
 
         {activeTab === 'tuition' && (

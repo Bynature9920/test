@@ -286,23 +286,8 @@ export const flightService = {
   async getBookings(): Promise<any[]> {
     try {
       // In production, call actual API
-      // Demo bookings
-      return [
-        {
-          id: 'booking-1',
-          flightId: 'flight-LOS-LON-0',
-          airline: 'Emirates',
-          flightNumber: 'EK783',
-          origin: { code: 'LOS', city: 'Lagos' },
-          destination: { code: 'LON', city: 'London' },
-          departureDate: '2024-02-15',
-          departureTime: '14:30',
-          passengers: 2,
-          totalAmount: '900000',
-          status: 'CONFIRMED',
-          bookingDate: '2024-01-10',
-        },
-      ]
+      // NO DEMO DATA - Return empty array (real bookings only)
+      return []
     } catch (error) {
       console.error('Error fetching bookings:', error)
       return []

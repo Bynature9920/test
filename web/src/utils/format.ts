@@ -1,5 +1,16 @@
-export function formatCurrency(amount: string | number): string {
+export function formatCurrency(amount: string | number | undefined | null): string {
+  // Handle null, undefined, or empty string
+  if (amount === null || amount === undefined || amount === '') {
+    return '₦0.00'
+  }
+  
   const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount
+  
+  // Check if parsing resulted in NaN
+  if (isNaN(numAmount)) {
+    return '₦0.00'
+  }
+  
   return new Intl.NumberFormat('en-NG', {
     style: 'currency',
     currency: 'NGN',

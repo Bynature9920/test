@@ -20,6 +20,18 @@ class CryptoTransactionStatus(str, enum.Enum):
     FAILED = "FAILED"
 
 
+class CryptoWallet(BaseModel):
+    """Crypto wallet model - stores user's deposit addresses."""
+    __tablename__ = "crypto_wallets"
+    
+    user_id = Column(String(20), ForeignKey("users.id"), nullable=False, index=True)
+    currency = Column(SQLEnum(CryptoCurrency), nullable=False, unique=False)
+    address = Column(String(255), nullable=False)  # Blockchain address for deposits
+    private_key_encrypted = Column(String(500), nullable=True)  # Encrypted private key (optional)
+    qr_code_data = Column(String(1000), nullable=True)  # Base64 encoded QR code
+    is_active = Column(String(10), nullable=False, default="1")
+
+
 class CryptoBalance(BaseModel):
     """Crypto balance model."""
     __tablename__ = "crypto_balances"

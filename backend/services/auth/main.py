@@ -132,14 +132,14 @@ async def login(credentials: UserLogin, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
+            detail="No existing account for this email"
         )
     
     # Verify password
     if not verify_password(credentials.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
+            detail="Incorrect password"
         )
     
     # Check if user is active

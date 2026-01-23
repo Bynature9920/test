@@ -65,8 +65,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(userData)
       setIsAuthenticated(true)
     } catch (error: any) {
-      const errorMessage = error?.response?.data?.error || error?.message || 'Login failed'
-      throw new Error(errorMessage)
+      // Re-throw the original error to preserve response data
+      throw error
     }
   }
 
@@ -96,8 +96,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(userData)
       setIsAuthenticated(true)
     } catch (error: any) {
-      const errorMessage = error?.response?.data?.error || error?.message || 'Google sign-in failed'
-      throw new Error(errorMessage)
+      // Re-throw the original error to preserve response data
+      throw error
     }
   }
 

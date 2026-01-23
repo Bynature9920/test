@@ -24,6 +24,9 @@ requests==2.31.0
 # Crypto Integration
 web3==6.11.3
 bitcoinlib==0.7.6
+qrcode[pil]==7.4.2
+base58==2.1.1
+coinbase-commerce==1.0.1
 
 # Task Queue
 celery==5.3.4

@@ -27,6 +27,7 @@ interface AdminStats {
   total_users: number
   active_users: number
   pending_kyc: number
+  not_started_kyc: number
   total_transactions: number
   total_volume: number
   pending_transactions: number
@@ -85,7 +86,32 @@ interface AuditLog {
   timestamp: string
 }
 
-type AdminTab = 'overview' | 'users' | 'kyc' | 'wallets' | 'transactions' | 'crypto' | 'cards' | 'loans' | 'risk' | 'logs'
+interface RiskAlert {
+  alert_id: string
+  user_id: string | null
+  user_name: string | null
+  user_email: string | null
+  alert_type: string
+  risk_level: string
+  status: string
+  description: string
+  amount: string | null
+  ip_address: string | null
+  resolved_by: string | null
+  notes: string | null
+  created_at: string
+}
+
+interface RiskStats {
+  total_alerts: number
+  open_alerts: number
+  critical_alerts: number
+  high_alerts: number
+  resolved_alerts: number
+  false_positives: number
+}
+
+type AdminTab = 'overview' | 'users' | 'kyc' | 'wallets' | 'transactions' | 'bills' | 'crypto' | 'cards' | 'loans' | 'risk' | 'logs'
 
 export default function AdminPage() {
   const { user } = useAuth()
@@ -104,10 +130,25 @@ export default function AdminPage() {
   const [kycDocuments, setKycDocuments] = useState<KYCDocument[]>([])
   const [wallets, setWallets] = useState<WalletInfo[]>([])
   const [transactions, setTransactions] = useState<TransactionInfo[]>([])
+  const [bills, setBills] = useState<any[]>([])
+  const [billProviders, setBillProviders] = useState<any[]>([])
+  const [cards, setCards] = useState<any[]>([])
+  const [cryptoBalances, setCryptoBalances] = useState<any[]>([])
+  const [cryptoTransactions, setCryptoTransactions] = useState<any[]>([])
+  const [cryptoWallets, setCryptoWallets] = useState<any[]>([])
+  const [cryptoStats, setCryptoStats] = useState<any>(null)
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([])
   const [selectedDocument, setSelectedDocument] = useState<KYCDocument | null>(null)
   const [showRejectModal, setShowRejectModal] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
+  
+  // Risk & Fraud state
+  const [riskAlerts, setRiskAlerts] = useState<RiskAlert[]>([])
+  const [riskStats, setRiskStats] = useState<RiskStats | null>(null)
+  const [selectedAlert, setSelectedAlert] = useState<RiskAlert | null>(null)
+  const [showAlertModal, setShowAlertModal] = useState(false)
+  const [alertNotes, setAlertNotes] = useState('')
+  const [alertStatusFilter, setAlertStatusFilter] = useState<string>('all')
 
   // Admin check
   const isAdmin = user?.email === 'admin@bengo.com' || user?.email === 'emzzygee000@gmail.com'
@@ -139,8 +180,35 @@ export default function AdminPage() {
       if (activeTab === 'transactions') {
         await loadTransactions()
       }
+      if (activeTab === 'bills') {
+        // Load bills - for now just fetch from API
+        try {
+          const response = await fetch('http://localhost:8000/api/v1/bills/history?page=1&limit=100', {
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+              'Content-Type': 'application/json',
+            },
+          })
+          if (response.ok) {
+            const data = await response.json()
+            setBills(data.bills || [])
+          }
+        } catch (error) {
+          console.error('Failed to load bills:', error)
+        }
+      }
+      if (activeTab === 'cards') {
+        await loadCards()
+      }
+      if (activeTab === 'crypto') {
+        await loadCryptoData()
+      }
       if (activeTab === 'logs') {
         await loadAuditLogs()
+      }
+      if (activeTab === 'risk') {
+        await loadRiskAlerts()
+        await loadRiskStats()
       }
     } catch (error) {
       console.error('Failed to load data:', error)
@@ -188,6 +256,7 @@ export default function AdminPage() {
         total_users: users.length,
         active_users: users.filter(u => u.is_active).length,
         pending_kyc: users.filter(u => u.kyc_status === 'PENDING' || u.kyc_status === 'IN_PROGRESS').length,
+        not_started_kyc: users.filter(u => u.kyc_status === 'NOT_STARTED').length,
         total_transactions: 0,
         total_volume: 0,
         pending_transactions: 0,
@@ -215,6 +284,68 @@ export default function AdminPage() {
       console.error(`Failed to ${action} user:`, error)
       toast.error(`Failed to ${action} user`)
     }
+  }
+
+  const handleFreezeWallet = async (userId: string) => {
+    try {
+      const response = await fetch(`http://localhost:8000/api/v1/admin/wallets/freeze/${userId}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json',
+        },
+      })
+      
+      if (!response.ok) throw new Error('Failed to freeze wallets')
+      
+      const data = await response.json()
+      toast.success(data.message)
+      setShowUserModal(false)
+      loadWallets()
+    } catch (error) {
+      console.error('Failed to freeze wallets:', error)
+      toast.error('Failed to freeze wallets')
+    }
+  }
+
+  const handleUnfreezeWallet = async (userId: string) => {
+    try {
+      const response = await fetch(`http://localhost:8000/api/v1/admin/wallets/unfreeze/${userId}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json',
+        },
+      })
+      
+      if (!response.ok) throw new Error('Failed to unfreeze wallets')
+      
+      const data = await response.json()
+      toast.success(data.message)
+      setShowUserModal(false)
+      loadWallets()
+    } catch (error) {
+      console.error('Failed to unfreeze wallets:', error)
+      toast.error('Failed to unfreeze wallets')
+    }
+  }
+
+  const handleViewUserTransactions = (userId: string) => {
+    setShowUserModal(false)
+    setActiveTab('transactions')
+    // Filter will be applied by the search term
+    setTimeout(() => {
+      setSearchTerm(userId)
+    }, 100)
+  }
+
+  const handleViewUserWallets = (userId: string) => {
+    setShowUserModal(false)
+    setActiveTab('wallets')
+    // The wallets will show for all users, but we can add filtering later
+    setTimeout(() => {
+      loadWallets()
+    }, 100)
   }
 
   const loadKYCDocuments = async () => {
@@ -271,6 +402,143 @@ export default function AdminPage() {
     } catch (error) {
       console.error('Failed to load transactions:', error)
       toast.error('Failed to load transactions')
+    }
+  }
+
+  const loadCards = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/v1/admin/cards', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json',
+        },
+      })
+      
+      if (!response.ok) throw new Error('Failed to load cards')
+      
+      const data = await response.json()
+      setCards(data.cards)
+    } catch (error) {
+      console.error('Failed to load cards:', error)
+      toast.error('Failed to load cards')
+    }
+  }
+
+  const handleFreezeCard = async (cardId: string) => {
+    try {
+      const response = await fetch(`http://localhost:8000/api/v1/admin/cards/${cardId}/freeze`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json',
+        },
+      })
+      
+      if (!response.ok) throw new Error('Failed to freeze card')
+      
+      toast.success('Card frozen successfully')
+      await loadCards()
+    } catch (error) {
+      console.error('Failed to freeze card:', error)
+      toast.error('Failed to freeze card')
+    }
+  }
+
+  const handleUnfreezeCard = async (cardId: string) => {
+    try {
+      const response = await fetch(`http://localhost:8000/api/v1/admin/cards/${cardId}/unfreeze`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json',
+        },
+      })
+      
+      if (!response.ok) throw new Error('Failed to unfreeze card')
+      
+      toast.success('Card unfrozen successfully')
+      await loadCards()
+    } catch (error) {
+      console.error('Failed to unfreeze card:', error)
+      toast.error('Failed to unfreeze card')
+    }
+  }
+
+  const handleDeleteCard = async (cardId: string) => {
+    if (!confirm('Are you sure you want to delete this card? Any remaining balance will be refunded to the user\'s wallet.')) {
+      return
+    }
+    
+    try {
+      const response = await fetch(`http://localhost:8000/api/v1/admin/cards/${cardId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json',
+        },
+      })
+      
+      if (!response.ok) throw new Error('Failed to delete card')
+      
+      toast.success('Card deleted successfully')
+      await loadCards()
+    } catch (error) {
+      console.error('Failed to delete card:', error)
+      toast.error('Failed to delete card')
+    }
+  }
+
+  const loadCryptoData = async () => {
+    try {
+      const [balancesRes, txnsRes, walletsRes, statsRes] = await Promise.all([
+        fetch('http://localhost:8000/api/v1/admin/crypto/balances', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+            'Content-Type': 'application/json',
+          },
+        }),
+        fetch('http://localhost:8000/api/v1/admin/crypto/transactions', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+            'Content-Type': 'application/json',
+          },
+        }),
+        fetch('http://localhost:8000/api/v1/admin/crypto/wallets', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+            'Content-Type': 'application/json',
+          },
+        }),
+        fetch('http://localhost:8000/api/v1/admin/crypto/stats', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+            'Content-Type': 'application/json',
+          },
+        })
+      ])
+
+      if (balancesRes.ok) {
+        const data = await balancesRes.json()
+        setCryptoBalances(data.balances)
+      }
+
+      if (txnsRes.ok) {
+        const data = await txnsRes.json()
+        setCryptoTransactions(data.transactions)
+      }
+
+      if (walletsRes.ok) {
+        const data = await walletsRes.json()
+        setCryptoWallets(data.wallets)
+      }
+
+      if (statsRes.ok) {
+        const data = await statsRes.json()
+        setCryptoStats(data)
+      }
+    } catch (error) {
+      console.error('Failed to load crypto data:', error)
+      toast.error('Failed to load crypto data')
     }
   }
 
@@ -344,6 +612,81 @@ export default function AdminPage() {
     }
   }
 
+  const loadRiskAlerts = async () => {
+    try {
+      const params = new URLSearchParams()
+      if (alertStatusFilter !== 'all') {
+        params.append('status', alertStatusFilter.toUpperCase())
+      }
+      
+      const response = await fetch(`http://localhost:8000/api/v1/admin/risk/alerts?${params}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json',
+        },
+      })
+      
+      if (!response.ok) throw new Error('Failed to load risk alerts')
+      
+      const data = await response.json()
+      setRiskAlerts(data.alerts)
+    } catch (error) {
+      console.error('Failed to load risk alerts:', error)
+      toast.error('Failed to load risk alerts')
+    }
+  }
+
+  const loadRiskStats = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/v1/admin/risk/stats', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json',
+        },
+      })
+      
+      if (!response.ok) throw new Error('Failed to load risk stats')
+      
+      const data = await response.json()
+      setRiskStats(data)
+    } catch (error) {
+      console.error('Failed to load risk stats:', error)
+      setRiskStats({
+        total_alerts: 0,
+        open_alerts: 0,
+        critical_alerts: 0,
+        high_alerts: 0,
+        resolved_alerts: 0,
+        false_positives: 0
+      })
+    }
+  }
+
+  const handleUpdateAlertStatus = async (alertId: string, status: string, notes: string) => {
+    try {
+      const response = await fetch(`http://localhost:8000/api/v1/admin/risk/alerts/${alertId}/update`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status, notes }),
+      })
+      
+      if (!response.ok) throw new Error('Failed to update alert')
+      
+      toast.success('Alert updated successfully')
+      setShowAlertModal(false)
+      setSelectedAlert(null)
+      setAlertNotes('')
+      loadRiskAlerts()
+      loadRiskStats()
+    } catch (error) {
+      console.error('Failed to update alert:', error)
+      toast.error('Failed to update alert')
+    }
+  }
+
   const exportToCSV = (data: any[], filename: string) => {
     if (data.length === 0) {
       toast.error('No data to export')
@@ -369,19 +712,20 @@ export default function AdminPage() {
 
   const getKycStatusBadge = (status: string) => {
     const config = {
-      VERIFIED: { color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400', icon: CheckCircle },
-      PENDING: { color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400', icon: Clock },
-      REJECTED: { color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400', icon: XCircle },
-      IN_PROGRESS: { color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400', icon: Clock },
+      NOT_STARTED: { color: 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400', icon: Clock, label: 'Not Started Yet' },
+      VERIFIED: { color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400', icon: CheckCircle, label: 'Verified' },
+      PENDING: { color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400', icon: Clock, label: 'Pending Review' },
+      REJECTED: { color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400', icon: XCircle, label: 'Rejected' },
+      IN_PROGRESS: { color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400', icon: Clock, label: 'In Progress' },
     }
     
-    const statusConfig = config[status as keyof typeof config] || config.PENDING
+    const statusConfig = config[status as keyof typeof config] || config.NOT_STARTED
     const Icon = statusConfig.icon
     
     return (
       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusConfig.color}`}>
         <Icon className="w-3 h-3 mr-1" />
-        {status}
+        {statusConfig.label}
       </span>
     )
   }
@@ -393,6 +737,23 @@ export default function AdminPage() {
     u.id.includes(searchTerm)
   )
 
+  const filteredTransactions = transactions.filter(txn =>
+    searchTerm === '' ||
+    txn.transaction_id.includes(searchTerm) ||
+    txn.sender_id?.includes(searchTerm) ||
+    txn.recipient_id?.includes(searchTerm) ||
+    txn.sender_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    txn.recipient_name?.toLowerCase().includes(searchTerm.toLowerCase())
+  )
+
+  const filteredWallets = wallets.filter(wallet =>
+    searchTerm === '' ||
+    wallet.wallet_id.includes(searchTerm) ||
+    wallet.user_id.includes(searchTerm) ||
+    wallet.user_email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    wallet.user_name.toLowerCase().includes(searchTerm.toLowerCase())
+  )
+
   if (!isAdmin) return null
 
   const tabs = [
@@ -401,6 +762,7 @@ export default function AdminPage() {
     { id: 'kyc', name: 'KYC Review', icon: UserCheck },
     { id: 'wallets', name: 'Wallets', icon: Wallet },
     { id: 'transactions', name: 'Transactions', icon: FileText },
+    { id: 'bills', name: 'Bill Payments', icon: FileText },
     { id: 'crypto', name: 'Crypto', icon: TrendingUp },
     { id: 'cards', name: 'Cards', icon: CreditCard },
     { id: 'loans', name: 'Loans', icon: DollarSign },
@@ -412,7 +774,7 @@ export default function AdminPage() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
           <Shield className="w-8 h-8 text-red-600 dark:text-red-400" />
           BenGo Admin Panel
         </h1>
@@ -772,10 +1134,10 @@ export default function AdminPage() {
                 <div className="flex items-center justify-between mb-6">
                   <div>
                     <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-                      All Wallets ({wallets.length})
+                      All Wallets ({filteredWallets.length})
                     </h2>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                      Read-only view. Balances cannot be edited by admins.
+                      {searchTerm ? 'Filtered results' : 'Read-only view. Balances cannot be edited by admins.'}
                     </p>
                   </div>
                   <div className="flex gap-2">
@@ -787,7 +1149,7 @@ export default function AdminPage() {
                       Refresh
                     </button>
                     <button
-                      onClick={() => exportToCSV(wallets, 'wallets')}
+                      onClick={() => exportToCSV(filteredWallets, 'wallets')}
                       className="btn-primary flex items-center gap-2"
                     >
                       <Download className="w-4 h-4" />
@@ -796,10 +1158,12 @@ export default function AdminPage() {
                   </div>
                 </div>
 
-                {wallets.length === 0 ? (
+                {filteredWallets.length === 0 ? (
                   <div className="text-center py-12">
                     <Wallet className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-600 dark:text-gray-400">No wallets found</p>
+                    <p className="text-gray-600 dark:text-gray-400">
+                      {searchTerm ? 'No wallets found matching your search' : 'No wallets found'}
+                    </p>
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -816,7 +1180,7 @@ export default function AdminPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {wallets.map((wallet) => (
+                        {filteredWallets.map((wallet) => (
                           <tr key={wallet.wallet_id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-slate-800/50">
                             <td className="py-3 px-4 text-sm text-gray-900 dark:text-gray-100 font-mono">{wallet.wallet_id}</td>
                             <td className="py-3 px-4 text-sm text-gray-900 dark:text-gray-100">{wallet.user_name}</td>
@@ -834,7 +1198,9 @@ export default function AdminPage() {
                                   {wallet.status}
                                 </span>
                                 {wallet.is_locked && (
-                                  <Lock className="w-4 h-4 text-red-600 dark:text-red-400" title="Locked" />
+                                  <span title="Locked">
+                                    <Lock className="w-4 h-4 text-red-600 dark:text-red-400" />
+                                  </span>
                                 )}
                               </div>
                             </td>
@@ -858,10 +1224,10 @@ export default function AdminPage() {
                 <div className="flex items-center justify-between mb-6">
                   <div>
                     <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-                      Recent Transactions ({transactions.length})
+                      Recent Transactions ({filteredTransactions.length})
                     </h2>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                      Showing last 100 transactions
+                      {searchTerm ? `Filtered results` : 'Showing last 100 transactions'}
                     </p>
                   </div>
                   <div className="flex gap-2">
@@ -873,7 +1239,7 @@ export default function AdminPage() {
                       Refresh
                     </button>
                     <button
-                      onClick={() => exportToCSV(transactions, 'transactions')}
+                      onClick={() => exportToCSV(filteredTransactions, 'transactions')}
                       className="btn-primary flex items-center gap-2"
                     >
                       <Download className="w-4 h-4" />
@@ -882,10 +1248,12 @@ export default function AdminPage() {
                   </div>
                 </div>
 
-                {transactions.length === 0 ? (
+                {filteredTransactions.length === 0 ? (
                   <div className="text-center py-12">
                     <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-600 dark:text-gray-400">No transactions found</p>
+                    <p className="text-gray-600 dark:text-gray-400">
+                      {searchTerm ? 'No transactions found matching your search' : 'No transactions found'}
+                    </p>
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -903,7 +1271,7 @@ export default function AdminPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {transactions.map((txn) => (
+                        {filteredTransactions.map((txn) => (
                           <tr key={txn.transaction_id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-slate-800/50">
                             <td className="py-3 px-4 text-xs text-gray-900 dark:text-gray-100 font-mono">
                               {txn.transaction_id.slice(0, 8)}...
@@ -946,25 +1314,523 @@ export default function AdminPage() {
             </div>
           )}
 
+          {/* BILLS TAB */}
+          {activeTab === 'bills' && (
+            <div className="space-y-6">
+              <div className="card">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                      Bill Payments ({bills.length})
+                    </h2>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                      View and manage bill payment transactions
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => {
+                        /* Load bills function */
+                        fetch('http://localhost:8000/api/v1/bills/history?page=1&limit=100', {
+                          headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+                            'Content-Type': 'application/json',
+                          },
+                        })
+                        .then(res => res.json())
+                        .then(data => setBills(data.bills || []))
+                        .catch(err => console.error(err))
+                      }}
+                      className="btn-outline flex items-center gap-2"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                      Refresh
+                    </button>
+                  </div>
+                </div>
+
+                {bills.length === 0 ? (
+                  <div className="text-center py-12">
+                    <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600 dark:text-gray-400">
+                      No bill payments found
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-gray-200 dark:border-gray-700">
+                          <th className="text-left py-3 px-4 text-sm font-semibold text-gray-900 dark:text-gray-100">Reference</th>
+                          <th className="text-left py-3 px-4 text-sm font-semibold text-gray-900 dark:text-gray-100">Type</th>
+                          <th className="text-left py-3 px-4 text-sm font-semibold text-gray-900 dark:text-gray-100">Provider</th>
+                          <th className="text-left py-3 px-4 text-sm font-semibold text-gray-900 dark:text-gray-100">Phone/Account</th>
+                          <th className="text-right py-3 px-4 text-sm font-semibold text-gray-900 dark:text-gray-100">Amount</th>
+                          <th className="text-left py-3 px-4 text-sm font-semibold text-gray-900 dark:text-gray-100">Status</th>
+                          <th className="text-left py-3 px-4 text-sm font-semibold text-gray-900 dark:text-gray-100">Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {bills.map((bill) => (
+                          <tr key={bill.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-slate-800/50">
+                            <td className="py-3 px-4 text-xs text-gray-900 dark:text-gray-100 font-mono">
+                              {bill.reference}
+                            </td>
+                            <td className="py-3 px-4 text-sm text-gray-900 dark:text-gray-100 uppercase">
+                              {bill.bill_type}
+                            </td>
+                            <td className="py-3 px-4 text-sm text-gray-900 dark:text-gray-100">
+                              {bill.provider}
+                            </td>
+                            <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">
+                              {bill.phone_number || bill.account_number || 'N/A'}
+                            </td>
+                            <td className="py-3 px-4 text-sm text-gray-900 dark:text-gray-100 font-mono text-right">
+                              ₦{parseFloat(bill.amount).toLocaleString(undefined, {minimumFractionDigits: 2})}
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                bill.status === 'success' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
+                                bill.status === 'pending' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                bill.status === 'failed' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' :
+                                'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400'
+                              }`}>
+                                {bill.status.toUpperCase()}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">
+                              {new Date(bill.created_at).toLocaleString()}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Bill Providers Management */}
+              <div className="card">
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                  Bill Providers
+                </h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                  Manage bill payment providers (airtime, data, TV)
+                </p>
+                <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                  <p>Provider management coming soon</p>
+                  <p className="text-xs mt-2">Enable/disable providers, set margins, view revenue</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeTab === 'crypto' && (
-            <div className="card text-center py-12">
-              <TrendingUp className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Crypto Operations</h3>
-              <p className="text-gray-600 dark:text-gray-400 mb-4">
-                Monitor crypto deposits, conversions, and balances
-              </p>
-              <p className="text-sm text-gray-500 dark:text-gray-500">Coming soon...</p>
+            <div className="space-y-6">
+              {/* Crypto Stats */}
+              {cryptoStats && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="card">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">Total Wallets</p>
+                        <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
+                          {cryptoStats.total_wallets}
+                        </p>
+                      </div>
+                      <Wallet className="w-8 h-8 text-blue-600" />
+                    </div>
+                  </div>
+
+                  <div className="card">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">Total Transactions</p>
+                        <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
+                          {cryptoStats.total_transactions}
+                        </p>
+                      </div>
+                      <Activity className="w-8 h-8 text-green-600" />
+                    </div>
+                  </div>
+
+                  <div className="card">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">Pending Transactions</p>
+                        <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
+                          {cryptoStats.pending_transactions}
+                        </p>
+                      </div>
+                      <Clock className="w-8 h-8 text-yellow-600" />
+                    </div>
+                  </div>
+
+                  <div className="card">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">30-Day Conversions</p>
+                        <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
+                          ₦{parseFloat(cryptoStats.recent_conversions_ngn || 0).toLocaleString()}
+                        </p>
+                      </div>
+                      <TrendingUp className="w-8 h-8 text-purple-600" />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Crypto Balances */}
+              <div className="card">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                  User Crypto Balances ({cryptoBalances.length})
+                </h3>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead>
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          User
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          Currency
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          Balance
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          Created
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                      {cryptoBalances.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+                            No crypto balances found
+                          </td>
+                        </tr>
+                      ) : (
+                        cryptoBalances.map((balance: any) => (
+                          <tr key={balance.balance_id}>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                              <div>
+                                <div className="font-medium text-gray-900 dark:text-gray-100">{balance.user_name}</div>
+                                <div className="text-gray-500 dark:text-gray-400">{balance.user_email}</div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                              <span className="px-2 py-1 text-xs rounded-full bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200">
+                                {balance.currency}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900 dark:text-gray-100">
+                              {parseFloat(balance.balance).toFixed(8)}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                              {new Date(balance.created_at).toLocaleDateString()}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Crypto Transactions */}
+              <div className="card">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                  Recent Crypto Transactions ({cryptoTransactions.length})
+                </h3>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead>
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          User
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          Type
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          Currency
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          Amount
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          NGN Amount
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          Status
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          Blockchain TX
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          Date
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                      {cryptoTransactions.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+                            No crypto transactions found
+                          </td>
+                        </tr>
+                      ) : (
+                        cryptoTransactions.map((txn: any) => (
+                          <tr key={txn.transaction_id}>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                              <div>
+                                <div className="font-medium text-gray-900 dark:text-gray-100">{txn.user_name}</div>
+                                <div className="text-gray-500 dark:text-gray-400 text-xs">{txn.user_email}</div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                              <span className={`px-2 py-1 text-xs rounded-full ${
+                                txn.transaction_type === 'FUND' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
+                                txn.transaction_type === 'CONVERT' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' :
+                                'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                              }`}>
+                                {txn.transaction_type}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                              <span className="px-2 py-1 text-xs rounded-full bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200">
+                                {txn.currency}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900 dark:text-gray-100">
+                              {parseFloat(txn.amount).toFixed(8)}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                              {txn.ngn_amount ? `₦${parseFloat(txn.ngn_amount).toLocaleString()}` : '-'}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                              <span className={`px-2 py-1 text-xs rounded-full ${
+                                txn.status === 'CONFIRMED' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
+                                txn.status === 'CONFIRMING' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' :
+                                txn.status === 'PENDING' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' :
+                                'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                              }`}>
+                                {txn.status}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                              {txn.blockchain_tx_hash ? (
+                                <span className="font-mono text-xs" title={txn.blockchain_tx_hash}>
+                                  {txn.blockchain_tx_hash.substring(0, 8)}...
+                                </span>
+                              ) : '-'}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                              {new Date(txn.created_at).toLocaleDateString()}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Crypto Wallets */}
+              <div className="card">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                  Crypto Deposit Wallets ({cryptoWallets.length})
+                </h3>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead>
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          User
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          Currency
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          Wallet Address
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          Status
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          Created
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                      {cryptoWallets.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+                            No crypto wallets found
+                          </td>
+                        </tr>
+                      ) : (
+                        cryptoWallets.map((wallet: any) => (
+                          <tr key={wallet.wallet_id}>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                              <div>
+                                <div className="font-medium text-gray-900 dark:text-gray-100">{wallet.user_name}</div>
+                                <div className="text-gray-500 dark:text-gray-400">{wallet.user_email}</div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                              <span className="px-2 py-1 text-xs rounded-full bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200">
+                                {wallet.currency}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-100">
+                              <span className="text-xs" title={wallet.address}>
+                                {wallet.address}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                              <span className={`px-2 py-1 text-xs rounded-full ${
+                                wallet.is_active === '1' 
+                                  ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' 
+                                  : 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
+                              }`}>
+                                {wallet.is_active === '1' ? 'Active' : 'Inactive'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                              {new Date(wallet.created_at).toLocaleDateString()}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           )}
 
           {activeTab === 'cards' && (
-            <div className="card text-center py-12">
-              <CreditCard className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Virtual Cards Management</h3>
-              <p className="text-gray-600 dark:text-gray-400 mb-4">
-                View and manage all issued virtual cards
-              </p>
-              <p className="text-sm text-gray-500 dark:text-gray-500">Coming soon...</p>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">Virtual Cards ({cards.length})</h3>
+              </div>
+
+              <div className="card overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                  <thead>
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        Card Number
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        User
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        Cardholder
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        Type
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        Status
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        Balance
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        Expiry
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        Created
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                    {cards.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
+                          No virtual cards found
+                        </td>
+                      </tr>
+                    ) : (
+                      cards.map((card: any) => (
+                        <tr key={card.card_id}>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                            <span className="font-mono">**** {card.card_number.slice(-4)}</span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                            <div>
+                              <div className="font-medium">{card.user_name}</div>
+                              <div className="text-gray-500 dark:text-gray-400">{card.user_email}</div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                            {card.cardholder_name}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            <span className="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+                              {card.card_type}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            <span className={`px-2 py-1 text-xs rounded-full ${
+                              card.status === 'ACTIVE' 
+                                ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' 
+                                : card.status === 'BLOCKED'
+                                ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                                : 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
+                            }`}>
+                              {card.status}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                            {card.currency} {parseFloat(card.balance).toLocaleString('en-NG', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                            {String(card.expiry_month).padStart(2, '0')}/{String(card.expiry_year).slice(-2)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                            {new Date(card.created_at).toLocaleDateString()}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            <div className="flex gap-2">
+                              {card.status === 'ACTIVE' ? (
+                                <button
+                                  onClick={() => handleFreezeCard(card.card_id)}
+                                  className="text-yellow-600 hover:text-yellow-900 dark:text-yellow-400"
+                                  title="Freeze card"
+                                >
+                                  <Lock className="w-4 h-4" />
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleUnfreezeCard(card.card_id)}
+                                  className="text-green-600 hover:text-green-900 dark:text-green-400"
+                                  title="Unfreeze card"
+                                >
+                                  <Unlock className="w-4 h-4" />
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleDeleteCard(card.card_id)}
+                                className="text-red-600 hover:text-red-900 dark:text-red-400"
+                                title="Delete card"
+                              >
+                                <Ban className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
@@ -980,13 +1846,159 @@ export default function AdminPage() {
           )}
 
           {activeTab === 'risk' && (
-            <div className="card text-center py-12">
-              <AlertTriangle className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Risk & Fraud Monitoring</h3>
-              <p className="text-gray-600 dark:text-gray-400 mb-4">
-                Detect and respond to suspicious activities
-              </p>
-              <p className="text-sm text-gray-500 dark:text-gray-500">Coming soon...</p>
+            <div className="space-y-6">
+              {/* Risk Stats */}
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                <div className="card">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Total Alerts</p>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-2">{riskStats?.total_alerts || 0}</p>
+                </div>
+                <div className="card">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Open</p>
+                  <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400 mt-2">{riskStats?.open_alerts || 0}</p>
+                </div>
+                <div className="card">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Critical</p>
+                  <p className="text-2xl font-bold text-red-600 dark:text-red-400 mt-2">{riskStats?.critical_alerts || 0}</p>
+                </div>
+                <div className="card">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">High Risk</p>
+                  <p className="text-2xl font-bold text-orange-600 dark:text-orange-400 mt-2">{riskStats?.high_alerts || 0}</p>
+                </div>
+                <div className="card">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Resolved</p>
+                  <p className="text-2xl font-bold text-green-600 dark:text-green-400 mt-2">{riskStats?.resolved_alerts || 0}</p>
+                </div>
+                <div className="card">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">False Positives</p>
+                  <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-2">{riskStats?.false_positives || 0}</p>
+                </div>
+              </div>
+
+              {/* Alerts Table */}
+              <div className="card">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                      Risk & Fraud Alerts ({riskAlerts.length})
+                    </h2>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                      Monitor and investigate suspicious activities
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <select
+                      value={alertStatusFilter}
+                      onChange={(e) => {
+                        setAlertStatusFilter(e.target.value)
+                        loadRiskAlerts()
+                      }}
+                      className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-slate-800 text-gray-900 dark:text-gray-100"
+                    >
+                      <option value="all">All Alerts</option>
+                      <option value="open">Open</option>
+                      <option value="investigating">Investigating</option>
+                      <option value="resolved">Resolved</option>
+                      <option value="false_positive">False Positive</option>
+                    </select>
+                    <button 
+                      onClick={() => {
+                        loadRiskAlerts()
+                        loadRiskStats()
+                      }}
+                      className="btn-outline flex items-center gap-2"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                      Refresh
+                    </button>
+                  </div>
+                </div>
+
+                {riskAlerts.length === 0 ? (
+                  <div className="text-center py-12">
+                    <AlertTriangle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600 dark:text-gray-400">
+                      {alertStatusFilter === 'all' ? 'No risk alerts found' : `No ${alertStatusFilter} alerts`}
+                    </p>
+                    <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
+                      All systems are operating normally
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-gray-200 dark:border-gray-700">
+                          <th className="text-left py-3 px-4 text-sm font-semibold text-gray-900 dark:text-gray-100">Risk Level</th>
+                          <th className="text-left py-3 px-4 text-sm font-semibold text-gray-900 dark:text-gray-100">Alert Type</th>
+                          <th className="text-left py-3 px-4 text-sm font-semibold text-gray-900 dark:text-gray-100">User</th>
+                          <th className="text-left py-3 px-4 text-sm font-semibold text-gray-900 dark:text-gray-100">Description</th>
+                          <th className="text-left py-3 px-4 text-sm font-semibold text-gray-900 dark:text-gray-100">Status</th>
+                          <th className="text-left py-3 px-4 text-sm font-semibold text-gray-900 dark:text-gray-100">Created</th>
+                          <th className="text-left py-3 px-4 text-sm font-semibold text-gray-900 dark:text-gray-100">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {riskAlerts.map((alert) => (
+                          <tr key={alert.alert_id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-slate-800/50">
+                            <td className="py-3 px-4">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                alert.risk_level === 'CRITICAL' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' :
+                                alert.risk_level === 'HIGH' ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400' :
+                                alert.risk_level === 'MEDIUM' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'
+                              }`}>
+                                {alert.risk_level}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-sm text-gray-900 dark:text-gray-100 font-medium">
+                              {alert.alert_type.replace(/_/g, ' ')}
+                            </td>
+                            <td className="py-3 px-4 text-sm">
+                              {alert.user_name ? (
+                                <>
+                                  <p className="text-gray-900 dark:text-gray-100">{alert.user_name}</p>
+                                  <p className="text-xs text-gray-500">{alert.user_email}</p>
+                                </>
+                              ) : (
+                                <span className="text-gray-500">System</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400 max-w-xs truncate">
+                              {alert.description}
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                alert.status === 'OPEN' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                alert.status === 'INVESTIGATING' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' :
+                                alert.status === 'RESOLVED' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
+                                'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400'
+                              }`}>
+                                {alert.status.replace(/_/g, ' ')}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">
+                              {new Date(alert.created_at).toLocaleString()}
+                            </td>
+                            <td className="py-3 px-4">
+                              <button
+                                onClick={() => {
+                                  setSelectedAlert(alert)
+                                  setAlertNotes(alert.notes || '')
+                                  setShowAlertModal(true)
+                                }}
+                                className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 text-sm font-medium"
+                              >
+                                Investigate
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -1167,15 +2179,31 @@ export default function AdminPage() {
                         Activate Account
                       </button>
                     )}
-                    <button className="btn-outline flex items-center gap-2">
+                    <button 
+                      onClick={() => handleFreezeWallet(selectedUser.id)}
+                      className="btn-outline flex items-center gap-2 text-orange-600 border-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20"
+                    >
                       <Lock className="w-4 h-4" />
                       Freeze Wallet
                     </button>
-                    <button className="btn-outline flex items-center gap-2">
+                    <button 
+                      onClick={() => handleUnfreezeWallet(selectedUser.id)}
+                      className="btn-outline flex items-center gap-2 text-blue-600 border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                    >
+                      <Unlock className="w-4 h-4" />
+                      Unfreeze Wallet
+                    </button>
+                    <button 
+                      onClick={() => handleViewUserTransactions(selectedUser.id)}
+                      className="btn-outline flex items-center gap-2"
+                    >
                       <Eye className="w-4 h-4" />
                       View Transactions
                     </button>
-                    <button className="btn-outline flex items-center gap-2">
+                    <button 
+                      onClick={() => handleViewUserWallets(selectedUser.id)}
+                      className="btn-outline flex items-center gap-2"
+                    >
                       <Wallet className="w-4 h-4" />
                       View Wallets
                     </button>
@@ -1249,6 +2277,144 @@ export default function AdminPage() {
                   >
                     Reject Document
                   </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Risk Alert Investigation Modal */}
+      {showAlertModal && selectedAlert && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Investigate Risk Alert</h2>
+                <button
+                  onClick={() => {
+                    setShowAlertModal(false)
+                    setSelectedAlert(null)
+                    setAlertNotes('')
+                  }}
+                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                >
+                  <XCircle className="w-6 h-6" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Alert ID</p>
+                    <p className="font-mono text-sm text-gray-900 dark:text-gray-100">{selectedAlert.alert_id}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Risk Level</p>
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      selectedAlert.risk_level === 'CRITICAL' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' :
+                      selectedAlert.risk_level === 'HIGH' ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400' :
+                      selectedAlert.risk_level === 'MEDIUM' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                      'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'
+                    }`}>
+                      {selectedAlert.risk_level}
+                    </span>
+                  </div>
+                  <div className="col-span-2">
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Alert Type</p>
+                    <p className="font-medium text-gray-900 dark:text-gray-100">{selectedAlert.alert_type.replace(/_/g, ' ')}</p>
+                  </div>
+                  {selectedAlert.user_name && (
+                    <div className="col-span-2">
+                      <p className="text-sm text-gray-600 dark:text-gray-400">User</p>
+                      <p className="font-medium text-gray-900 dark:text-gray-100">{selectedAlert.user_name}</p>
+                      <p className="text-sm text-gray-500">{selectedAlert.user_email}</p>
+                    </div>
+                  )}
+                  <div className="col-span-2">
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Description</p>
+                    <p className="text-gray-900 dark:text-gray-100">{selectedAlert.description}</p>
+                  </div>
+                  {selectedAlert.amount && (
+                    <div>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">Amount</p>
+                      <p className="font-medium text-gray-900 dark:text-gray-100">₦{parseFloat(selectedAlert.amount).toLocaleString()}</p>
+                    </div>
+                  )}
+                  {selectedAlert.ip_address && (
+                    <div>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">IP Address</p>
+                      <p className="font-mono text-sm text-gray-900 dark:text-gray-100">{selectedAlert.ip_address}</p>
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Created</p>
+                    <p className="text-sm text-gray-900 dark:text-gray-100">{new Date(selectedAlert.created_at).toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Current Status</p>
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      selectedAlert.status === 'OPEN' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                      selectedAlert.status === 'INVESTIGATING' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' :
+                      selectedAlert.status === 'RESOLVED' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
+                      'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400'
+                    }`}>
+                      {selectedAlert.status.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Investigation Notes
+                  </label>
+                  <textarea
+                    value={alertNotes}
+                    onChange={(e) => setAlertNotes(e.target.value)}
+                    placeholder="Add your investigation notes here..."
+                    rows={4}
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-slate-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Update Status</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {selectedAlert.status !== 'INVESTIGATING' && (
+                      <button
+                        onClick={() => handleUpdateAlertStatus(selectedAlert.alert_id, 'INVESTIGATING', alertNotes)}
+                        className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg font-medium transition-colors"
+                      >
+                        Mark as Investigating
+                      </button>
+                    )}
+                    {selectedAlert.status !== 'RESOLVED' && (
+                      <button
+                        onClick={() => handleUpdateAlertStatus(selectedAlert.alert_id, 'RESOLVED', alertNotes)}
+                        className="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded-lg font-medium transition-colors"
+                      >
+                        Mark as Resolved
+                      </button>
+                    )}
+                    {selectedAlert.status !== 'FALSE_POSITIVE' && (
+                      <button
+                        onClick={() => handleUpdateAlertStatus(selectedAlert.alert_id, 'FALSE_POSITIVE', alertNotes)}
+                        className="bg-gray-600 hover:bg-gray-700 text-white py-2 px-4 rounded-lg font-medium transition-colors"
+                      >
+                        Mark as False Positive
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        setShowAlertModal(false)
+                        setSelectedAlert(null)
+                        setAlertNotes('')
+                      }}
+                      className="btn-outline"
+                    >
+                      Close
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

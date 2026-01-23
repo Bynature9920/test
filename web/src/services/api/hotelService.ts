@@ -260,20 +260,8 @@ export const hotelService = {
       // const response = await apiClient.instance.get('/api/v1/travel/bookings?type=HOTEL')
       // return response.data
 
-      // Demo reservations
-      return [
-        {
-          id: 'res-1',
-          hotelId: 'hotel-1',
-          hotelName: 'Lagos Continental Hotel',
-          checkIn: '2024-02-15',
-          checkOut: '2024-02-18',
-          guests: 2,
-          totalAmount: '135000',
-          status: 'CONFIRMED',
-          bookingDate: '2024-01-10',
-        },
-      ]
+      // NO DEMO DATA - Return empty array (real reservations only)
+      return []
     } catch (error) {
       console.error('Error fetching reservations:', error)
       return []

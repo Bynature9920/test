@@ -12,6 +12,7 @@ from .reward import Reward, UserRewardsBalance, RewardType, RewardStatus
 from .travel import TravelBooking, BookingType, BookingStatus
 from .kyc import KYCVerification
 from .verification import VerificationDocument, VerificationStatus
+from .bill import Bill, BillProvider, BillTransaction
 
 __all__ = [
     "BaseModel",
@@ -44,4 +45,7 @@ __all__ = [
     "KYCVerification",
     "VerificationDocument",
     "VerificationStatus",
+    "Bill",
+    "BillProvider",
+    "BillTransaction",
 ]

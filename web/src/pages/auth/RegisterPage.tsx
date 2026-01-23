@@ -1,12 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
-import { useTheme } from '@/contexts/ThemeContext'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import toast from 'react-hot-toast'
-import { Sun, Moon, ChevronDown, Search } from 'lucide-react'
+import { ChevronDown, Search } from 'lucide-react'
 import { countries, Country } from '@/data/countries'
 
 const registerSchema = z.object({
@@ -23,7 +22,6 @@ type RegisterFormData = z.infer<typeof registerSchema>
 export default function RegisterPage() {
   const navigate = useNavigate()
   const { register: registerUser, loginWithGoogle } = useAuth()
-  const { theme, toggleTheme } = useTheme()
   const [isLoading, setIsLoading] = useState(false)
   const [isGoogleLoading, setIsGoogleLoading] = useState(false)
   const [selectedCountry, setSelectedCountry] = useState<Country>(
@@ -85,7 +83,7 @@ export default function RegisterPage() {
     try {
       const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
       if (!clientId) {
-        toast.error('Google sign-up is not configured. Please set VITE_GOOGLE_CLIENT_ID in your .env file.')
+        console.warn('Google sign-up is not configured. VITE_GOOGLE_CLIENT_ID missing.')
         setIsGoogleLoading(false)
         return
       }
@@ -123,26 +121,13 @@ export default function RegisterPage() {
       // Trigger the sign-in popup
       (window as any).google.accounts.id.prompt()
     } catch (error: any) {
-      toast.error('Failed to initialize Google sign-up. Please use email/password for now.')
+      console.error('Failed to initialize Google sign-up:', error)
       setIsGoogleLoading(false)
     }
   }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-500 to-primary-700 dark:from-primary-600 dark:to-primary-900 px-4 py-12 relative">
-      <button
-        type="button"
-        onClick={toggleTheme}
-        className="absolute top-4 right-4 flex items-center justify-center w-10 h-10 rounded-lg bg-white/20 dark:bg-gray-900/20 hover:bg-white/30 dark:hover:bg-gray-900/30 backdrop-blur-sm transition-colors cursor-pointer active:scale-95 z-50"
-        title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-        aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-      >
-        {theme === 'light' ? (
-          <Moon className="w-5 h-5 text-white" />
-        ) : (
-          <Sun className="w-5 h-5 text-white" />
-        )}
-      </button>
       <div className="max-w-md w-full bg-white dark:bg-gray-900 rounded-lg shadow-xl p-8 border border-gray-200 dark:border-gray-800">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Create Account</h1>

@@ -5,12 +5,13 @@ type Theme = 'light' | 'dark'
 interface ThemeContextType {
   theme: Theme
   toggleTheme: () => void
+  setTheme: (theme: Theme) => void
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(() => {
+  const [theme, setThemeState] = useState<Theme>(() => {
     if (typeof window === 'undefined') return 'light'
     const saved = localStorage.getItem('theme')
     if (saved === 'light' || saved === 'dark') {
@@ -27,24 +28,26 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('theme', theme)
   }, [theme])
 
-  const toggleTheme = useCallback(() => {
-    setTheme((prev) => {
-      const newTheme = prev === 'light' ? 'dark' : 'light'
-      // Apply immediately to HTML element
-      if (typeof document !== 'undefined') {
-        const html = document.documentElement
-        html.classList.remove('light', 'dark')
-        html.classList.add(newTheme)
-        localStorage.setItem('theme', newTheme)
-        // Force a repaint
-        void html.offsetHeight
-      }
-      return newTheme
-    })
+  const setTheme = useCallback((newTheme: Theme) => {
+    setThemeState(newTheme)
+    // Apply immediately to HTML element
+    if (typeof document !== 'undefined') {
+      const html = document.documentElement
+      html.classList.remove('light', 'dark')
+      html.classList.add(newTheme)
+      localStorage.setItem('theme', newTheme)
+      // Force a repaint
+      void html.offsetHeight
+    }
   }, [])
 
+  const toggleTheme = useCallback(() => {
+    const newTheme = theme === 'light' ? 'dark' : 'light'
+    setTheme(newTheme)
+  }, [theme, setTheme])
+
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme }}>
+    <ThemeContext.Provider value={{ theme, toggleTheme, setTheme }}>
       {children}
     </ThemeContext.Provider>
   )

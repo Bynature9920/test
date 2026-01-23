@@ -1,19 +1,19 @@
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
+import { useState, useEffect } from 'react'
 import {
   LayoutDashboard,
-  Wallet,
   Send,
   Coins,
   CreditCard,
   Banknote,
   Plane,
   Shield,
+  X,
 } from 'lucide-react'
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { name: 'Wallet', href: '/wallet', icon: Wallet },
   { name: 'Payments', href: '/payments', icon: Send },
   { name: 'Crypto', href: '/crypto', icon: Coins },
   { name: 'Cards', href: '/cards', icon: CreditCard },
@@ -24,9 +24,34 @@ const navigation = [
 export default function Sidebar() {
   const { user } = useAuth()
   const isAdmin = user?.email === 'admin@bengo.com' || user?.email === 'emzzygee000@gmail.com'
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+
+  // Listen for mobile menu toggle event
+  useEffect(() => {
+    const handleToggle = () => setIsMobileMenuOpen(prev => !prev)
+    window.addEventListener('toggleMobileMenu', handleToggle)
+    return () => window.removeEventListener('toggleMobileMenu', handleToggle)
+  }, [])
+
+  // Close mobile menu on route change
+  useEffect(() => {
+    setIsMobileMenuOpen(false)
+  }, [window.location.pathname])
 
   return (
-    <aside className="fixed left-0 top-16 h-[calc(100vh-4rem)] w-64 bg-white dark:bg-slate-900/80 backdrop-blur-md border-r border-gray-200 dark:border-slate-700/50 overflow-y-auto z-40">
+    <>
+      {/* Mobile menu backdrop */}
+      {isMobileMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+      
+      {/* Sidebar */}
+      <aside className={`fixed left-0 top-16 h-[calc(100vh-4rem)] w-64 bg-white dark:bg-slate-900/80 backdrop-blur-md border-r border-gray-200 dark:border-slate-700/50 overflow-y-auto z-50 transition-transform duration-300 ${
+        isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+      }`}>
       <nav className="p-4 space-y-2">
         {navigation.map((item) => {
           const Icon = item.icon
@@ -69,6 +94,7 @@ export default function Sidebar() {
         )}
       </nav>
     </aside>
+    </>
   )
 }
 

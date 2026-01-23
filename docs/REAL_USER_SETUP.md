@@ -1,3 +1,5 @@
+
+
 # Setting Up Real User Registration
 
 This guide explains how to enable real user registration (not just demo mode) for the Fintech Super App.

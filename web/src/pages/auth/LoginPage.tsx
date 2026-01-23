@@ -1,12 +1,25 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
-import { useTheme } from '@/contexts/ThemeContext'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import toast from 'react-hot-toast'
-import { Sun, Moon, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
+
+// Declare Google Identity Services types
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (config: any) => void
+          prompt: (callback?: (notification: any) => void) => void
+        }
+      }
+    }
+  }
+}
 
 const loginSchema = z.object({
   email: z.string().email('Invalid email address'),
@@ -18,34 +31,35 @@ type LoginFormData = z.infer<typeof loginSchema>
 export default function LoginPage() {
   const navigate = useNavigate()
   const { login, loginWithGoogle } = useAuth()
-  const { theme, toggleTheme } = useTheme()
   const [isLoading, setIsLoading] = useState(false)
   const [isGoogleLoading, setIsGoogleLoading] = useState(false)
   const [googleReady, setGoogleReady] = useState(false)
+  const [emailError, setEmailError] = useState<string>('')
+  const [passwordError, setPasswordError] = useState<string>('')
 
   // Initialize Google Identity Services on mount
   useEffect(() => {
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
     if (!clientId) {
-      console.warn('Google Client ID not configured')
+      console.error('❌ Google Client ID not configured. Set VITE_GOOGLE_CLIENT_ID in your .env file')
+      console.error('Create a .env file in the web folder with: VITE_GOOGLE_CLIENT_ID=your-client-id-here')
       return
     }
 
-    const checkGoogle = () => {
-      if (typeof window !== 'undefined' && (window as any).google && (window as any).google.accounts) {
+    console.log('🔵 Initializing Google Sign-in...')
+    console.log('Client ID:', clientId.substring(0, 30) + '...')
+    
+    const initGoogle = () => {
+      if (window.google?.accounts?.id) {
         try {
-          console.log('Initializing Google Identity Services with Client ID:', clientId)
-          console.log('Current origin:', window.location.origin)
-          
-          (window as any).google.accounts.id.initialize({
+          window.google.accounts.id.initialize({
             client_id: clientId,
             callback: async (response: { credential: string }) => {
               try {
                 setIsGoogleLoading(true)
                 console.log('✅ Google ID token received, sending to backend...')
-                console.log('Token length:', response.credential.length)
                 await loginWithGoogle(response.credential)
-                toast.success('Login successful!')
+                // Redirect silently without success toast
                 setTimeout(() => {
                   navigate('/dashboard')
                 }, 100)
@@ -56,25 +70,22 @@ export default function LoginPage() {
                 setIsGoogleLoading(false)
               }
             },
-            // Use popup mode but disable FedCM
             ux_mode: 'popup',
             use_fedcm_for_prompt: false,
           })
-          console.log('Google Identity Services initialized successfully')
+          console.log('✅ Google Identity Services initialized')
           setGoogleReady(true)
         } catch (error) {
-          console.error('Error initializing Google Identity Services:', error)
-          toast.error('Failed to initialize Google sign-in. Check console for details.')
+          console.error('❌ Error initializing Google:', error)
         }
       } else {
-        // Retry after a short delay
-        setTimeout(checkGoogle, 100)
+        console.log('⏳ Google script not ready, retrying...')
+        setTimeout(initGoogle, 500)
       }
     }
 
-    // Start checking after a brief delay to allow script to load
-    const timer = setTimeout(checkGoogle, 500)
-    return () => clearTimeout(timer)
+    // Start initialization
+    setTimeout(initGoogle, 100)
   }, [loginWithGoogle, navigate])
 
   const {
@@ -87,16 +98,29 @@ export default function LoginPage() {
 
   const onSubmit = async (data: LoginFormData) => {
     setIsLoading(true)
+    // Clear previous errors
+    setEmailError('')
+    setPasswordError('')
+    
     try {
       await login(data.email, data.password)
-      toast.success('Login successful!')
-      // Small delay to ensure state is updated
+      // Redirect silently without success toast
       setTimeout(() => {
         navigate('/dashboard')
       }, 100)
     } catch (error: any) {
-      const errorMessage = error?.response?.data?.error || error?.message || 'Login failed. Please check your credentials.'
-      toast.error(errorMessage)
+      const errorMessage = error?.response?.data?.detail || error?.response?.data?.error || error?.message || 'Login failed. Please check your credentials.'
+      
+      // Set field-specific errors
+      if (errorMessage === 'No existing account for this email') {
+        setEmailError(errorMessage)
+      } else if (errorMessage === 'Incorrect password') {
+        setPasswordError(errorMessage)
+      } else {
+        // For other errors, use toast
+        toast.error(errorMessage)
+      }
+      
       console.error('Login error:', error)
     } finally {
       setIsLoading(false)
@@ -106,116 +130,48 @@ export default function LoginPage() {
   const handleGoogleSignIn = async () => {
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
     if (!clientId) {
-      toast.error('Google sign-in is not configured. Please set VITE_GOOGLE_CLIENT_ID in your .env file.')
+      toast.error('Google sign-in is not configured. Please contact support.')
+      console.error('VITE_GOOGLE_CLIENT_ID environment variable is missing')
       return
     }
 
-    if (!googleReady) {
-      toast.error('Google sign-in is still loading. Please wait a moment and try again.')
+    // Check if Google is loaded
+    if (!window.google?.accounts?.id) {
+      toast.error('Google sign-in is not available. Please refresh the page.')
+      console.error('Google Identity Services not loaded')
       return
     }
 
     setIsGoogleLoading(true)
 
     try {
-      console.log('🔵 Triggering Google sign-in with One Tap...')
-      console.log('Client ID:', clientId.substring(0, 30) + '...')
-      console.log('Origin:', window.location.origin)
+      console.log('🔵 Triggering Google sign-in popup...')
       
-      // Disable FedCM and use traditional popup
-      (window as any).google.accounts.id.prompt((notification: any) => {
+      // Use the popup method directly
+      window.google.accounts.id.prompt((notification: any) => {
         console.log('Prompt notification:', notification)
         
         if (notification.isNotDisplayed()) {
-          const reasons = notification.getNotDisplayedReason()
-          console.error('❌ Google prompt not displayed. Reason:', reasons)
-          
-          if (reasons === 'browser_not_supported' || reasons === 'invalid_client') {
-            const setupUrl = 'https://console.cloud.google.com/apis/credentials'
-            const errorMsg = `
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🔴 GOOGLE OAUTH ERROR: "Cannot Continue"
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Your current URL is NOT authorized in Google Cloud Console.
-
-📍 YOUR CURRENT URL: ${window.location.origin}
-
-🔧 QUICK FIX (5 steps):
-
-1. Open: ${setupUrl}
-2. Find OAuth Client ID: ${clientId.substring(0, 30)}...
-3. Click "Edit" (pencil icon)
-4. In "Authorized JavaScript origins", click "+ ADD URI" and add:
-   
-   ${window.location.origin}
-   
-   Also add these:
-   http://localhost:3000
-   http://localhost:3001
-   http://localhost:5173
-
-5. Click "SAVE" and WAIT 5-10 MINUTES
-
-⚠️ IMPORTANT:
-- Use http:// (NOT https://)
-- Use localhost (NOT 127.0.0.1)
-- DO NOT add backend URL (http://localhost:8000)
-
-After saving, close ALL browser windows, wait 5-10 minutes, and try again.
-
-📄 See GOOGLE_OAUTH_QUICK_FIX.md for detailed step-by-step instructions.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            `
-            console.error(errorMsg)
-            toast.error('⚠️ Google OAuth not configured! Check console (F12) for fix.', { duration: 8000 })
-            setIsGoogleLoading(false)
-          } else {
-            console.error('Other reason:', reasons)
-            toast.error(`Google sign-in error: ${reasons}. Check console for details.`)
-            setIsGoogleLoading(false)
-          }
-        } else if (notification.isSkippedMoment()) {
-          const reasons = notification.getSkippedReason()
-          console.warn('Prompt skipped:', reasons)
-          // Try alternative method
-          toast('Please select your Google account from the popup')
-        } else if (notification.isDismissedMoment()) {
-          const reasons = notification.getDismissedReason()
-          console.warn('Prompt dismissed:', reasons)
+          console.error('❌ Google prompt not displayed:', notification.getNotDisplayedReason())
+          toast.error('Google sign-in blocked. Please check your browser settings.')
           setIsGoogleLoading(false)
-        } else {
-          console.log('✅ Google prompt is showing')
+        } else if (notification.isSkippedMoment()) {
+          console.warn('Prompt skipped:', notification.getSkippedReason())
+          setIsGoogleLoading(false)
+        } else if (notification.isDismissedMoment()) {
+          console.warn('Prompt dismissed:', notification.getDismissedReason())
+          setIsGoogleLoading(false)
         }
       })
     } catch (error: any) {
       console.error('❌ Google sign-in error:', error)
-      console.error('Error details:', {
-        message: error?.message,
-        stack: error?.stack,
-        clientId: clientId?.substring(0, 20) + '...',
-        origin: window.location.origin
-      })
-      toast.error('Failed to start Google sign-in. Check console (F12) for details.')
+      toast.error('Failed to start Google sign-in. Please try again.')
       setIsGoogleLoading(false)
     }
   }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-500 to-primary-700 dark:from-primary-600 dark:to-primary-900 px-4 relative">
-      <button
-        type="button"
-        onClick={toggleTheme}
-        className="absolute top-4 right-4 flex items-center justify-center w-10 h-10 rounded-lg bg-white/20 dark:bg-gray-900/20 hover:bg-white/30 dark:hover:bg-gray-900/30 backdrop-blur-sm transition-colors cursor-pointer active:scale-95 z-50"
-        title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-        aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-      >
-        {theme === 'light' ? (
-          <Moon className="w-5 h-5 text-white" />
-        ) : (
-          <Sun className="w-5 h-5 text-white" />
-        )}
-      </button>
       <div className="max-w-md w-full bg-white dark:bg-gray-900 rounded-lg shadow-xl p-8 border border-gray-200 dark:border-gray-800">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">BenGo</h1>
@@ -233,9 +189,16 @@ After saving, close ALL browser windows, wait 5-10 minutes, and try again.
               id="email"
               className="input-field"
               placeholder="Enter your email"
+              onChange={(e) => {
+                register('email').onChange(e)
+                setEmailError('')
+              }}
             />
             {errors.email && (
               <p className="mt-1 text-sm text-red-600 dark:text-red-400">{errors.email.message}</p>
+            )}
+            {emailError && !errors.email && (
+              <p className="mt-1 text-sm text-red-600 dark:text-red-400">{emailError}</p>
             )}
           </div>
 
@@ -249,9 +212,16 @@ After saving, close ALL browser windows, wait 5-10 minutes, and try again.
               id="password"
               className="input-field"
               placeholder="Enter your password"
+              onChange={(e) => {
+                register('password').onChange(e)
+                setPasswordError('')
+              }}
             />
             {errors.password && (
               <p className="mt-1 text-sm text-red-600 dark:text-red-400">{errors.password.message}</p>
+            )}
+            {passwordError && !errors.password && (
+              <p className="mt-1 text-sm text-red-600 dark:text-red-400">{passwordError}</p>
             )}
           </div>
 
@@ -277,7 +247,7 @@ After saving, close ALL browser windows, wait 5-10 minutes, and try again.
           <button
             type="button"
             onClick={handleGoogleSignIn}
-            disabled={isGoogleLoading || !googleReady}
+            disabled={isGoogleLoading}
             className="mt-4 w-full flex items-center justify-center gap-3 px-4 py-3 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isGoogleLoading ? (
@@ -309,11 +279,6 @@ After saving, close ALL browser windows, wait 5-10 minutes, and try again.
               </>
             )}
           </button>
-          {!googleReady && (
-            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 text-center">
-              Loading Google sign-in...
-            </p>
-          )}
           
         </div>
 

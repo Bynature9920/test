@@ -6,7 +6,12 @@ import ForgotPasswordPage from '@/pages/auth/ForgotPasswordPage'
 import ResetPasswordPage from '@/pages/auth/ResetPasswordPage'
 import DashboardPage from '@/pages/dashboard/DashboardPage'
 import WalletPage from '@/pages/wallet/WalletPage'
+import SendToUserPage from '@/pages/wallet/SendToUserPage'
 import PaymentsPage from '@/pages/payments/PaymentsPage'
+import AirtimePage from '@/pages/payments/AirtimePage'
+import DataPage from '@/pages/payments/DataPage'
+import TvPage from '@/pages/payments/TvPage'
+import BettingPage from '@/pages/payments/BettingPage'
 import CryptoPage from '@/pages/crypto/CryptoPage'
 import CardsPage from '@/pages/cards/CardsPage'
 import LoansPage from '@/pages/loans/LoansPage'
@@ -60,7 +65,12 @@ function AppRouter() {
               <Routes>
                 <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/wallet" element={<WalletPage />} />
+                <Route path="/send-to-user" element={<SendToUserPage />} />
                 <Route path="/payments" element={<PaymentsPage />} />
+                <Route path="/payments/airtime" element={<AirtimePage />} />
+                <Route path="/payments/data" element={<DataPage />} />
+                <Route path="/payments/tv" element={<TvPage />} />
+                <Route path="/payments/betting" element={<BettingPage />} />
                 <Route path="/crypto" element={<CryptoPage />} />
                 <Route path="/cards" element={<CardsPage />} />
                 <Route path="/loans" element={<LoansPage />} />

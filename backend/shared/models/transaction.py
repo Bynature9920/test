@@ -19,6 +19,8 @@ class TransactionType(str, enum.Enum):
     TRAVEL_BOOKING = "TRAVEL_BOOKING"
     REWARD_EARNED = "REWARD_EARNED"
     REWARD_REDEEMED = "REWARD_REDEEMED"
+    TRANSFER_IN = "TRANSFER_IN"
+    TRANSFER_OUT = "TRANSFER_OUT"
 
 
 class TransactionStatus(str, enum.Enum):

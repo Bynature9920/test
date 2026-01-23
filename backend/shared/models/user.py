@@ -8,6 +8,7 @@ import enum
 
 
 class KYCStatus(str, enum.Enum):
+    NOT_STARTED = "NOT_STARTED"
     PENDING = "PENDING"
     IN_PROGRESS = "IN_PROGRESS"
     VERIFIED = "VERIFIED"
@@ -24,7 +25,7 @@ class User(BaseModel):
     first_name = Column(String(100), nullable=False)
     last_name = Column(String(100), nullable=False)
     country_code = Column(String(2), nullable=False, default="NG")
-    kyc_status = Column(SQLEnum(KYCStatus), nullable=False, default=KYCStatus.PENDING)
+    kyc_status = Column(SQLEnum(KYCStatus), nullable=False, default=KYCStatus.NOT_STARTED)
     is_active = Column(Boolean, default=True, nullable=False)
     is_verified = Column(Boolean, default=False, nullable=False)
     last_login = Column(DateTime(timezone=True), nullable=True)
@@ -40,4 +41,5 @@ class User(BaseModel):
     # Relationships
     wallets = relationship("Wallet", back_populates="user", lazy="dynamic")
     transactions = relationship("Transaction", back_populates="user", lazy="dynamic")
+    bills = relationship("Bill", back_populates="user", lazy="dynamic")
 

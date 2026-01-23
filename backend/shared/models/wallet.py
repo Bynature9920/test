@@ -1,7 +1,7 @@
 """
 Wallet models.
 """
-from sqlalchemy import Column, String, Numeric, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Column, String, Numeric, ForeignKey, Boolean, Enum as SQLEnum
 from sqlalchemy.orm import relationship
 from .base import BaseModel
 import enum
@@ -22,6 +22,7 @@ class Wallet(BaseModel):
     balance = Column(Numeric(20, 2), nullable=False, default=0.00)
     pending_balance = Column(Numeric(20, 2), nullable=False, default=0.00)
     status = Column(SQLEnum(WalletStatus), nullable=False, default=WalletStatus.ACTIVE)
+    is_locked = Column(Boolean, nullable=False, default=False)
     
     # Relationships
     user = relationship("User", back_populates="wallets")

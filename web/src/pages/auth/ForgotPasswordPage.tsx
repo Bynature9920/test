@@ -1,11 +1,9 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { useTheme } from '@/contexts/ThemeContext'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import toast from 'react-hot-toast'
-import { Sun, Moon, ArrowLeft } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { authService } from '@/services/api/authService'
 
 const forgotPasswordSchema = z.object({
@@ -16,9 +14,9 @@ type ForgotPasswordFormData = z.infer<typeof forgotPasswordSchema>
 
 export default function ForgotPasswordPage() {
   const navigate = useNavigate()
-  const { theme, toggleTheme } = useTheme()
   const [isLoading, setIsLoading] = useState(false)
   const [emailSent, setEmailSent] = useState(false)
+  const [emailError, setEmailError] = useState<string>('')
 
   const {
     register,
@@ -30,14 +28,21 @@ export default function ForgotPasswordPage() {
 
   const onSubmit = async (data: ForgotPasswordFormData) => {
     setIsLoading(true)
+    setEmailError('')
+    
     try {
       await authService.forgotPassword(data.email)
       setEmailSent(true)
-      toast.success('Password reset email sent! Check your inbox.')
     } catch (error: any) {
-      // Always show success message for security (don't reveal if email exists)
-      setEmailSent(true)
-      toast.success('If the email exists, a password reset link has been sent.')
+      const errorMessage = error?.response?.data?.detail || error?.response?.data?.error || error?.message || 'Failed to send reset link'
+      
+      // Show inline error for non-existent email
+      if (errorMessage === 'No existing account for this email') {
+        setEmailError(errorMessage)
+      } else {
+        // For other errors, don't reveal information - just show generic message below email
+        setEmailError(errorMessage)
+      }
     } finally {
       setIsLoading(false)
     }
@@ -45,19 +50,6 @@ export default function ForgotPasswordPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-500 to-primary-700 dark:from-primary-600 dark:to-primary-900 px-4 py-12 relative">
-      <button
-        type="button"
-        onClick={toggleTheme}
-        className="absolute top-4 right-4 flex items-center justify-center w-10 h-10 rounded-lg bg-white/20 dark:bg-gray-900/20 hover:bg-white/30 dark:hover:bg-gray-900/30 backdrop-blur-sm transition-colors cursor-pointer active:scale-95 z-50"
-        title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-        aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-      >
-        {theme === 'light' ? (
-          <Moon className="w-5 h-5 text-white" />
-        ) : (
-          <Sun className="w-5 h-5 text-white" />
-        )}
-      </button>
       <div className="max-w-md w-full bg-white dark:bg-gray-900 rounded-lg shadow-xl p-8 border border-gray-200 dark:border-gray-800">
         <Link
           to="/login"
@@ -122,9 +114,16 @@ export default function ForgotPasswordPage() {
                 id="email"
                 className="input-field"
                 placeholder="Enter your email"
+                onChange={(e) => {
+                  register('email').onChange(e)
+                  setEmailError('')
+                }}
               />
               {errors.email && (
                 <p className="mt-1 text-sm text-red-600 dark:text-red-400">{errors.email.message}</p>
+              )}
+              {emailError && !errors.email && (
+                <p className="mt-1 text-sm text-red-600 dark:text-red-400">{emailError}</p>
               )}
             </div>
 
