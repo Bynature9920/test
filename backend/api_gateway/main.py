@@ -80,10 +80,13 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware - Allow all origins in development for Google OAuth
+# CORS middleware
+# In production, this will use ALLOWED_ORIGINS from environment variables
+# In development, falls back to localhost
+allowed_origins = settings.allowed_origins_list if settings.app_env == "production" else ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development/Google OAuth
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
