@@ -1,16 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { walletService } from '@/services/api/walletService'
-import { Wallet, TrendingUp, Send, Coins, Eye, EyeOff, ArrowDownCircle, CreditCard, Building2, Smartphone, Phone, Wifi, Tv, Trophy, ArrowLeftRight, Sparkles, Plus, X } from 'lucide-react'
+import { Wallet, TrendingUp, Send, Coins, Eye, EyeOff, ArrowDownCircle, CreditCard, Building2, Smartphone, Phone, Wifi, Tv, Trophy, ArrowLeftRight, Sparkles, Plus, X, ChevronLeft, ChevronRight } from 'lucide-react'
 import { formatCurrency } from '@/utils/format'
 import DepositCryptoModal from '@/components/DepositCryptoModal'
 import toast from 'react-hot-toast'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 
+type BalanceView = 'naira' | 'crypto'
+type CryptoType = 'USDT' | 'BTC' | 'ETH'
+
 export default function DashboardPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const [balance, setBalance] = useState<any>(null)
+  const [cryptoBalances, setCryptoBalances] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [hideBalance, setHideBalance] = useState(false)
   const [showDepositCryptoModal, setShowDepositCryptoModal] = useState(false)
@@ -22,9 +26,19 @@ export default function DashboardPage() {
   const [convertCurrency, setConvertCurrency] = useState<'USDT' | 'BTC' | 'ETH'>('USDT')
   const [convertAmount, setConvertAmount] = useState('')
   const [processingConvert, setProcessingConvert] = useState(false)
+  
+  // Swipeable balance card state
+  const [currentView, setCurrentView] = useState<BalanceView>('naira')
+  const [selectedCrypto, setSelectedCrypto] = useState<CryptoType>('USDT')
+  const [touchStart, setTouchStart] = useState<number | null>(null)
+  const [touchEnd, setTouchEnd] = useState<number | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const [dragOffset, setDragOffset] = useState(0)
+  const cardRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     loadBalance()
+    loadCryptoBalances()
   }, [])
 
   const loadBalance = async () => {
@@ -44,6 +58,38 @@ export default function DashboardPage() {
       })
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadCryptoBalances = async () => {
+    try {
+      const data = await walletService.getAllBalances()
+      console.log('Crypto balances received:', data)
+      
+      // Extract crypto balances
+      const cryptoData: Record<CryptoType, string> = {
+        USDT: '0.00',
+        BTC: '0.00',
+        ETH: '0.00'
+      }
+      
+      if (data.balances) {
+        data.balances.forEach((bal: any) => {
+          if (bal.currency === 'USDT' || bal.currency === 'BTC' || bal.currency === 'ETH') {
+            cryptoData[bal.currency as CryptoType] = bal.available_balance
+          }
+        })
+      }
+      
+      setCryptoBalances(cryptoData)
+    } catch (error) {
+      console.error('Failed to load crypto balances:', error)
+      // Set default zero balances
+      setCryptoBalances({
+        USDT: '0.00',
+        BTC: '0.00',
+        ETH: '0.00'
+      })
     }
   }
 
@@ -95,6 +141,118 @@ export default function DashboardPage() {
       toast.error(message)
     } finally {
       setProcessingConvert(false)
+    }
+  }
+
+  // Swipe gesture handlers
+  const minSwipeDistance = 50
+  
+  const onTouchStart = (e: React.TouchEvent) => {
+    setTouchEnd(null)
+    setTouchStart(e.targetTouches[0].clientX)
+    setIsDragging(true)
+  }
+  
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (!touchStart) return
+    const currentTouch = e.targetTouches[0].clientX
+    const diff = currentTouch - touchStart
+    
+    // Limit drag to prevent over-scrolling
+    const maxDrag = 100
+    const limitedDiff = Math.max(-maxDrag, Math.min(maxDrag, diff))
+    setDragOffset(limitedDiff)
+    setTouchEnd(currentTouch)
+  }
+  
+  const onTouchEnd = () => {
+    if (!touchStart || touchEnd === null) {
+      setIsDragging(false)
+      setDragOffset(0)
+      return
+    }
+    
+    const distance = touchStart - touchEnd
+    const isLeftSwipe = distance > minSwipeDistance
+    const isRightSwipe = distance < -minSwipeDistance
+    
+    if (isLeftSwipe && currentView === 'naira') {
+      // Swipe left: go to crypto view
+      setCurrentView('crypto')
+    } else if (isRightSwipe && currentView === 'crypto') {
+      // Swipe right: go back to naira view
+      setCurrentView('naira')
+    }
+    
+    setIsDragging(false)
+    setDragOffset(0)
+    setTouchStart(null)
+    setTouchEnd(null)
+  }
+
+  // Mouse drag handlers for desktop
+  const onMouseDown = (e: React.MouseEvent) => {
+    setTouchEnd(null)
+    setTouchStart(e.clientX)
+    setIsDragging(true)
+  }
+
+  const onMouseMove = (e: React.MouseEvent) => {
+    if (!touchStart || !isDragging) return
+    const currentPos = e.clientX
+    const diff = currentPos - touchStart
+    
+    // Limit drag to prevent over-scrolling
+    const maxDrag = 100
+    const limitedDiff = Math.max(-maxDrag, Math.min(maxDrag, diff))
+    setDragOffset(limitedDiff)
+    setTouchEnd(currentPos)
+  }
+
+  const onMouseUp = () => {
+    if (!touchStart || touchEnd === null) {
+      setIsDragging(false)
+      setDragOffset(0)
+      return
+    }
+    
+    const distance = touchStart - touchEnd
+    const isLeftSwipe = distance > minSwipeDistance
+    const isRightSwipe = distance < -minSwipeDistance
+    
+    if (isLeftSwipe && currentView === 'naira') {
+      setCurrentView('crypto')
+    } else if (isRightSwipe && currentView === 'crypto') {
+      setCurrentView('naira')
+    }
+    
+    setIsDragging(false)
+    setDragOffset(0)
+    setTouchStart(null)
+    setTouchEnd(null)
+  }
+
+  const getCryptoIcon = (crypto: CryptoType) => {
+    switch (crypto) {
+      case 'USDT':
+        return '₮'
+      case 'BTC':
+        return '₿'
+      case 'ETH':
+        return 'Ξ'
+    }
+  }
+
+  const formatCryptoBalance = (amount: string, crypto: CryptoType) => {
+    const num = parseFloat(amount)
+    if (isNaN(num)) return '0.00'
+    
+    if (crypto === 'BTC') {
+      return num.toFixed(8) // Bitcoin uses 8 decimals
+    } else if (crypto === 'ETH') {
+      return num.toFixed(6) // Ethereum uses 6 decimals
+    } else {
+      return num.toFixed(2) // USDT uses 2 decimals
     }
   }
 
@@ -185,29 +343,140 @@ export default function DashboardPage() {
             </div>
           ) : (
             <>
-              {/* Available Balance Card - Premium Design */}
-              <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20 shadow-lg hover:bg-white/15 transition-all">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <Wallet className="w-5 h-5 text-white/80" />
-                    <p className="text-sm font-medium text-white/80">Available Balance</p>
-                  </div>
-                  <button
-                    onClick={() => setHideBalance(!hideBalance)}
-                    className="p-2 hover:bg-white/10 rounded-lg transition-all transform hover:scale-110"
-                    title={hideBalance ? 'Show balance' : 'Hide balance'}
-                  >
-                    {hideBalance ? (
-                      <EyeOff className="w-5 h-5 text-white/80" />
-                    ) : (
-                      <Eye className="w-5 h-5 text-white/80" />
-                    )}
-                  </button>
+              {/* Swipeable Balance Card */}
+              <div className="relative">
+                {/* Swipe Indicators */}
+                <div className="flex items-center justify-center gap-2 mb-3">
+                  <div
+                    className={`h-1.5 rounded-full transition-all duration-300 ${
+                      currentView === 'naira' ? 'w-6 bg-white' : 'w-1.5 bg-white/40'
+                    }`}
+                  />
+                  <div
+                    className={`h-1.5 rounded-full transition-all duration-300 ${
+                      currentView === 'crypto' ? 'w-6 bg-white' : 'w-1.5 bg-white/40'
+                    }`}
+                  />
                 </div>
-                <div className="flex items-baseline gap-2">
-                  <p className="text-4xl md:text-5xl font-bold text-white tracking-tight">
-                    {hideBalance ? '••••••' : (balance ? formatCurrency(balance.available_balance) : '₦0.00')}
-                  </p>
+
+                {/* Balance Card Container */}
+                <div
+                  ref={cardRef}
+                  className="relative overflow-hidden touch-pan-y select-none cursor-grab active:cursor-grabbing"
+                  onTouchStart={onTouchStart}
+                  onTouchMove={onTouchMove}
+                  onTouchEnd={onTouchEnd}
+                  onMouseDown={onMouseDown}
+                  onMouseMove={onMouseMove}
+                  onMouseUp={onMouseUp}
+                  onMouseLeave={() => {
+                    if (isDragging) onMouseUp()
+                  }}
+                >
+                  <div
+                    className="flex transition-transform duration-300 ease-out"
+                    style={{
+                      transform: isDragging
+                        ? `translateX(${dragOffset}px)`
+                        : currentView === 'naira'
+                        ? 'translateX(0%)'
+                        : 'translateX(-100%)',
+                    }}
+                  >
+                    {/* Naira Balance View */}
+                    <div className="w-full flex-shrink-0">
+                      <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20 shadow-lg hover:bg-white/15 transition-all">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <Wallet className="w-5 h-5 text-white/80" />
+                            <p className="text-sm font-medium text-white/80">Available Balance</p>
+                          </div>
+                          <button
+                            onClick={() => setHideBalance(!hideBalance)}
+                            className="p-2 hover:bg-white/10 rounded-lg transition-all transform hover:scale-110"
+                            title={hideBalance ? 'Show balance' : 'Hide balance'}
+                          >
+                            {hideBalance ? (
+                              <EyeOff className="w-5 h-5 text-white/80" />
+                            ) : (
+                              <Eye className="w-5 h-5 text-white/80" />
+                            )}
+                          </button>
+                        </div>
+                        <div className="flex items-baseline gap-2">
+                          <p className="text-4xl md:text-5xl font-bold text-white tracking-tight">
+                            {hideBalance ? '••••••' : (balance ? formatCurrency(balance.available_balance) : '₦0.00')}
+                          </p>
+                        </div>
+                        <div className="flex items-center justify-center mt-3 opacity-50">
+                          <ChevronLeft className="w-4 h-4 text-white/60" />
+                          <span className="text-xs text-white/60 mx-2">Swipe for crypto</span>
+                          <ChevronRight className="w-4 h-4 text-white/60" />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Crypto Balance View */}
+                    <div className="w-full flex-shrink-0 pl-4">
+                      <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20 shadow-lg hover:bg-white/15 transition-all">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <Coins className="w-5 h-5 text-white/80" />
+                            <p className="text-sm font-medium text-white/80">Crypto Balance</p>
+                          </div>
+                          <button
+                            onClick={() => setHideBalance(!hideBalance)}
+                            className="p-2 hover:bg-white/10 rounded-lg transition-all transform hover:scale-110"
+                            title={hideBalance ? 'Show balance' : 'Hide balance'}
+                          >
+                            {hideBalance ? (
+                              <EyeOff className="w-5 h-5 text-white/80" />
+                            ) : (
+                              <Eye className="w-5 h-5 text-white/80" />
+                            )}
+                          </button>
+                        </div>
+                        
+                        {/* Crypto Amount Display */}
+                        <div className="flex items-baseline gap-2 mb-4">
+                          <span className="text-3xl md:text-4xl font-bold text-white/90">
+                            {getCryptoIcon(selectedCrypto)}
+                          </span>
+                          <p className="text-4xl md:text-5xl font-bold text-white tracking-tight">
+                            {hideBalance
+                              ? '••••••'
+                              : cryptoBalances
+                              ? formatCryptoBalance(cryptoBalances[selectedCrypto], selectedCrypto)
+                              : '0.00'}
+                          </p>
+                          <span className="text-xl text-white/60 font-semibold">{selectedCrypto}</span>
+                        </div>
+
+                        {/* Crypto Selector Pills */}
+                        <div className="flex items-center gap-2">
+                          {(['USDT', 'BTC', 'ETH'] as CryptoType[]).map((crypto) => (
+                            <button
+                              key={crypto}
+                              onClick={() => setSelectedCrypto(crypto)}
+                              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                                selectedCrypto === crypto
+                                  ? 'bg-white text-primary-600 shadow-md'
+                                  : 'bg-white/10 text-white/70 hover:bg-white/20'
+                              }`}
+                            >
+                              {getCryptoIcon(crypto)} {crypto}
+                            </button>
+                          ))}
+                        </div>
+                        
+                        <div className="flex items-center justify-center mt-3 opacity-50">
+                          <ChevronLeft className="w-4 h-4 text-white/60" />
+                          <span className="text-xs text-white/60 mx-2">Swipe for Naira</span>
+                          <ChevronRight className="w-4 h-4 text-white/60" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </>

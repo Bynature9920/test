@@ -2,6 +2,7 @@
 Shared configuration management.
 """
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
 from typing import List
 import os
 from functools import lru_cache
@@ -15,6 +16,16 @@ class Settings(BaseSettings):
     app_env: str = "development"
     debug: bool = True
     api_version: str = "v1"
+    
+    @field_validator('debug', mode='before')
+    @classmethod
+    def validate_debug(cls, v):
+        """Handle various boolean representations for debug."""
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            return v.lower() in ('true', '1', 'yes', 'on')
+        return bool(v)
     
     # Database
     database_url: str
