@@ -192,6 +192,12 @@ export default function DashboardPage() {
 
   // Mouse drag handlers for desktop
   const onMouseDown = (e: React.MouseEvent) => {
+    // Prevent drag if clicking on interactive elements
+    const target = e.target as HTMLElement
+    if (target.closest('button') || target.tagName === 'BUTTON') {
+      return
+    }
+    
     setTouchEnd(null)
     setTouchStart(e.clientX)
     setIsDragging(true)
@@ -362,7 +368,8 @@ export default function DashboardPage() {
                 {/* Balance Card Container */}
                 <div
                   ref={cardRef}
-                  className="relative overflow-hidden touch-pan-y select-none cursor-grab active:cursor-grabbing"
+                  className="relative overflow-hidden touch-pan-y select-none"
+                  style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
                   onTouchStart={onTouchStart}
                   onTouchMove={onTouchMove}
                   onTouchEnd={onTouchEnd}
@@ -385,80 +392,104 @@ export default function DashboardPage() {
                   >
                     {/* Naira Balance View */}
                     <div className="w-full flex-shrink-0">
-                      <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20 shadow-lg hover:bg-white/15 transition-all">
+                      <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-4 sm:p-6 border border-white/20 shadow-lg hover:bg-white/15 transition-all">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
-                            <Wallet className="w-5 h-5 text-white/80" />
-                            <p className="text-sm font-medium text-white/80">Available Balance</p>
+                            <Wallet className="w-4 h-4 sm:w-5 sm:h-5 text-white/80" />
+                            <p className="text-xs sm:text-sm font-medium text-white/80">Available Balance</p>
                           </div>
                           <button
-                            onClick={() => setHideBalance(!hideBalance)}
-                            className="p-2 hover:bg-white/10 rounded-lg transition-all transform hover:scale-110"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setHideBalance(!hideBalance)
+                            }}
+                            onTouchStart={(e) => e.stopPropagation()}
+                            onTouchEnd={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            className="p-2 hover:bg-white/10 rounded-lg transition-all transform hover:scale-110 touch-manipulation"
                             title={hideBalance ? 'Show balance' : 'Hide balance'}
                           >
                             {hideBalance ? (
-                              <EyeOff className="w-5 h-5 text-white/80" />
+                              <EyeOff className="w-4 h-4 sm:w-5 sm:h-5 text-white/80" />
                             ) : (
-                              <Eye className="w-5 h-5 text-white/80" />
+                              <Eye className="w-4 h-4 sm:w-5 sm:h-5 text-white/80" />
                             )}
                           </button>
                         </div>
                         <div className="flex items-baseline gap-2">
-                          <p className="text-4xl md:text-5xl font-bold text-white tracking-tight">
+                          <p className="text-3xl sm:text-4xl md:text-5xl font-bold text-white tracking-tight break-all">
                             {hideBalance ? '••••••' : (balance ? formatCurrency(balance.available_balance) : '₦0.00')}
                           </p>
                         </div>
                         <div className="flex items-center justify-center mt-3 opacity-50">
-                          <ChevronLeft className="w-4 h-4 text-white/60" />
-                          <span className="text-xs text-white/60 mx-2">Swipe for crypto</span>
-                          <ChevronRight className="w-4 h-4 text-white/60" />
+                          <ChevronLeft className="w-3 h-3 sm:w-4 sm:h-4 text-white/60" />
+                          <span className="text-[10px] sm:text-xs text-white/60 mx-2">Swipe for crypto</span>
+                          <ChevronRight className="w-3 h-3 sm:w-4 sm:h-4 text-white/60" />
                         </div>
                       </div>
                     </div>
 
                     {/* Crypto Balance View */}
                     <div className="w-full flex-shrink-0 pl-4">
-                      <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20 shadow-lg hover:bg-white/15 transition-all">
+                      <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-4 sm:p-6 border border-white/20 shadow-lg hover:bg-white/15 transition-all">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
-                            <Coins className="w-5 h-5 text-white/80" />
-                            <p className="text-sm font-medium text-white/80">Crypto Balance</p>
+                            <Coins className="w-4 h-4 sm:w-5 sm:h-5 text-white/80" />
+                            <p className="text-xs sm:text-sm font-medium text-white/80">Crypto Balance</p>
                           </div>
                           <button
-                            onClick={() => setHideBalance(!hideBalance)}
-                            className="p-2 hover:bg-white/10 rounded-lg transition-all transform hover:scale-110"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setHideBalance(!hideBalance)
+                            }}
+                            onTouchStart={(e) => e.stopPropagation()}
+                            onTouchEnd={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            className="p-2 hover:bg-white/10 rounded-lg transition-all transform hover:scale-110 touch-manipulation"
                             title={hideBalance ? 'Show balance' : 'Hide balance'}
                           >
                             {hideBalance ? (
-                              <EyeOff className="w-5 h-5 text-white/80" />
+                              <EyeOff className="w-4 h-4 sm:w-5 sm:h-5 text-white/80" />
                             ) : (
-                              <Eye className="w-5 h-5 text-white/80" />
+                              <Eye className="w-4 h-4 sm:w-5 sm:h-5 text-white/80" />
                             )}
                           </button>
                         </div>
                         
                         {/* Crypto Amount Display */}
-                        <div className="flex items-baseline gap-2 mb-4">
-                          <span className="text-3xl md:text-4xl font-bold text-white/90">
+                        <div className="flex items-baseline gap-1 sm:gap-2 mb-4 flex-wrap">
+                          <span className="text-2xl sm:text-3xl md:text-4xl font-bold text-white/90">
                             {getCryptoIcon(selectedCrypto)}
                           </span>
-                          <p className="text-4xl md:text-5xl font-bold text-white tracking-tight">
+                          <p className="text-3xl sm:text-4xl md:text-5xl font-bold text-white tracking-tight break-all">
                             {hideBalance
                               ? '••••••'
                               : cryptoBalances
                               ? formatCryptoBalance(cryptoBalances[selectedCrypto], selectedCrypto)
                               : '0.00'}
                           </p>
-                          <span className="text-xl text-white/60 font-semibold">{selectedCrypto}</span>
+                          <span className="text-base sm:text-xl text-white/60 font-semibold">{selectedCrypto}</span>
                         </div>
 
                         {/* Crypto Selector Pills */}
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           {(['USDT', 'BTC', 'ETH'] as CryptoType[]).map((crypto) => (
                             <button
                               key={crypto}
-                              onClick={() => setSelectedCrypto(crypto)}
-                              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setSelectedCrypto(crypto)
+                              }}
+                              onTouchStart={(e) => {
+                                e.stopPropagation()
+                              }}
+                              onTouchEnd={(e) => {
+                                e.stopPropagation()
+                              }}
+                              onMouseDown={(e) => {
+                                e.stopPropagation()
+                              }}
+                              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all touch-manipulation ${
                                 selectedCrypto === crypto
                                   ? 'bg-white text-primary-600 shadow-md'
                                   : 'bg-white/10 text-white/70 hover:bg-white/20'
@@ -470,9 +501,9 @@ export default function DashboardPage() {
                         </div>
                         
                         <div className="flex items-center justify-center mt-3 opacity-50">
-                          <ChevronLeft className="w-4 h-4 text-white/60" />
-                          <span className="text-xs text-white/60 mx-2">Swipe for Naira</span>
-                          <ChevronRight className="w-4 h-4 text-white/60" />
+                          <ChevronLeft className="w-3 h-3 sm:w-4 sm:h-4 text-white/60" />
+                          <span className="text-[10px] sm:text-xs text-white/60 mx-2">Swipe for Naira</span>
+                          <ChevronRight className="w-3 h-3 sm:w-4 sm:h-4 text-white/60" />
                         </div>
                       </div>
                     </div>
