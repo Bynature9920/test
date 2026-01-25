@@ -458,9 +458,6 @@ export default function DashboardPage() {
                         
                         {/* Crypto Amount Display */}
                         <div className="flex items-baseline gap-1 sm:gap-2 mb-4 flex-wrap">
-                          <span className="text-2xl sm:text-3xl md:text-4xl font-bold text-white/90">
-                            {getCryptoIcon(selectedCrypto)}
-                          </span>
                           <p className="text-3xl sm:text-4xl md:text-5xl font-bold text-white tracking-tight break-all">
                             {hideBalance
                               ? '••••••'
@@ -495,7 +492,7 @@ export default function DashboardPage() {
                                   : 'bg-white/10 text-white/70 hover:bg-white/20'
                               }`}
                             >
-                              {getCryptoIcon(crypto)} {crypto}
+                              {crypto}
                             </button>
                           ))}
                         </div>
